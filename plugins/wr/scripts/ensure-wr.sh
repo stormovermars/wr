@@ -7,7 +7,7 @@
 set -u
 exe=""
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) exe=".exe" ;; esac
-want="0.2.1"
+want="0.2.2"
 min_mw="0.2.1"
 ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; } # ver_ge HAVE WANT
 mw_have=$(mw version -j 2>/dev/null | sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' | head -n1)

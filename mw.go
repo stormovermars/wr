@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"strings"
@@ -27,7 +28,7 @@ type MW struct {
 	calls     []string                   // every mw invocation (args joined), for tests and doctor
 	memo      map[string]any             // per-tick cache: item lists and gate states
 	Timings   map[string][]time.Duration // per mw verb, every call (tests report where time goes)
-	LockWaits int64                      // calls that failed with "board locked" (mw waited its 5 s)
+	LockWaits int64                      // calls that failed with "board locked" (mw's lock wait timed out; claims retry it)
 	tens      []MWTenant                 // tenants from `mw version -j` (nil: ask `mw tenant list`)
 }
 
@@ -134,9 +135,36 @@ func (m *MW) must(args ...string) (string, error) {
 		return "", err
 	}
 	if r.Code != 0 {
-		return "", fmt.Errorf("mw %s: %s", strings.Join(args, " "), r.Err)
+		msg := r.Err
+		if msg == "" { // never a bare failure: name the exit code (a Windows NTSTATUS shows as 0xC...)
+			msg = fmt.Sprintf("exit code %d (0x%X), no stderr", r.Code, uint32(r.Code))
+		}
+		return "", fmt.Errorf("mw %s: %s", strings.Join(args, " "), msg)
 	}
 	return r.Out, nil
+}
+
+// isLockTimeout: mw gave up waiting for the board lock ("board locked (pid P) ..." from every
+// mw >= 0.2.1); nothing was written, so the call can simply be repeated.
+func isLockTimeout(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "board locked")
+}
+
+// lockRetries and lockRetryDelay bound retryLock: up to 3 repeats, each after a jittered
+// lockRetryDelay..2*lockRetryDelay pause (spreads the runners that timed out together).
+var (
+	lockRetries    = 3
+	lockRetryDelay = time.Second
+)
+
+// retryLock runs call and repeats it while it fails with a lock wait timeout.
+func retryLock(call func() (string, error)) (string, error) {
+	out, err := call()
+	for i := 0; i < lockRetries && isLockTimeout(err); i++ {
+		time.Sleep(lockRetryDelay + time.Duration(rand.Int64N(int64(lockRetryDelay)+1)))
+		out, err = call()
+	}
+	return out, err
 }
 
 // wr needs mw >= MinMW and board schema 8 only (no compatibility with older mw).
@@ -285,7 +313,10 @@ func parseNext(out string) (*NextItem, error) {
 // next + get-prompt + session start + start. nil when nothing is ready (mw prints
 // null, exit 0).
 func (m *MW) claimNext(tenant, name, role string) (*NextItem, error) {
-	out, err := m.must("next", "--claim", "-t", tenant, "-s", name, "-a", role, "--prompt", "-j")
+	// a lock wait timeout claimed nothing: retry it before the dispatch counts an error
+	out, err := retryLock(func() (string, error) {
+		return m.must("next", "--claim", "-t", tenant, "-s", name, "-a", role, "--prompt", "-j")
+	})
 	if err != nil {
 		return nil, err
 	}
