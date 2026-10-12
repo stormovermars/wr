@@ -13,16 +13,17 @@ import (
 )
 
 type statusDoc struct {
-	Tenants []statusRow `json:"tenants"`
-	Live    []liveRow   `json:"live"`
-	Recent  []recentRow `json:"recent"`
-	Stuck   []stuckRow  `json:"stuck"`
-	Skips   []pausedRow `json:"skips"`
-	Caps    Usage       `json:"caps"`
-	Paused  []pausedRow `json:"paused"`
-	Cost    []costRow   `json:"cost"`
-	Stop    []string    `json:"stop_files"`
-	MW      mwInfo      `json:"mw"`
+	Tenants  []statusRow `json:"tenants"`
+	Archived int         `json:"archived_hidden,omitempty"` // archived tenants left out
+	Live     []liveRow   `json:"live"`
+	Recent   []recentRow `json:"recent"`
+	Stuck    []stuckRow  `json:"stuck"`
+	Skips    []pausedRow `json:"skips"`
+	Caps     Usage       `json:"caps"`
+	Paused   []pausedRow `json:"paused"`
+	Cost     []costRow   `json:"cost"`
+	Stop     []string    `json:"stop_files"`
+	MW       mwInfo      `json:"mw"`
 }
 
 type mwInfo struct {
@@ -31,16 +32,17 @@ type mwInfo struct {
 }
 
 type statusRow struct {
-	Tenant  string  `json:"tenant"`
-	Enabled bool    `json:"enabled"`
-	Engine  string  `json:"engine"`
-	Last    string  `json:"last_outcome"`
-	Running int     `json:"running"`
-	Today   float64 `json:"usd_today"`
-	Done    int     `json:"done"`
-	Total   int     `json:"total"`
-	Doing   int     `json:"doing"`
-	Blocked int     `json:"blocked"`
+	Tenant  string   `json:"tenant"`
+	Tags    []string `json:"tags,omitempty"`
+	Enabled bool     `json:"enabled"`
+	Engine  string   `json:"engine"`
+	Last    string   `json:"last_outcome"`
+	Running int      `json:"running"`
+	Today   float64  `json:"usd_today"`
+	Done    int      `json:"done"`
+	Total   int      `json:"total"`
+	Doing   int      `json:"doing"`
+	Blocked int      `json:"blocked"`
 }
 
 type pausedRow struct {
@@ -114,7 +116,7 @@ func statusData(d *Dispatcher, o map[string]string) (statusDoc, error) {
 		Paused: []pausedRow{}, Stop: stopFiles(d.Home), Caps: d.usage(), MW: mwInfo{Schema: d.MW.Schema, Source: d.MW.Source}}
 	ts := tenantList(d.Cfg, o)
 	if o["tenant"] == "" {
-		ts = d.Cfg.tenantsInOrder()
+		ts, doc.Archived = d.shown(d.Cfg.tenantsInOrder())
 	}
 	all, _ := readRuns(d.Home, "")
 	liveNames := map[string]bool{}
@@ -147,7 +149,7 @@ func statusData(d *Dispatcher, o map[string]string) (statusDoc, error) {
 	doc.Cost = costRows(all)
 	for _, t := range ts {
 		tc := d.Cfg.Tenants[t]
-		r := statusRow{Tenant: t, Enabled: tc.Enabled, Engine: tc.Engine, Last: lastOutcome(d.Home, t)}
+		r := statusRow{Tenant: t, Tags: d.MW.meta(t).Tags, Enabled: tc.Enabled, Engine: tc.Engine, Last: lastOutcome(d.Home, t)}
 		for _, x := range all {
 			if x.Tenant != t {
 				continue
@@ -232,7 +234,10 @@ func statusCommand(d *Dispatcher, o map[string]string) error {
 		return failed()
 	}
 	for _, r := range doc.Tenants {
-		fmt.Fprintf(d.Out, "%-14s enabled=%-5v engine=%-7s last=%-10s running=%d usd_today=%.4f done=%d/%d doing=%d blocked=%d\n", r.Tenant, r.Enabled, r.Engine, r.Last, r.Running, r.Today, r.Done, r.Total, r.Doing, r.Blocked)
+		fmt.Fprintf(d.Out, "%-14s enabled=%-5v engine=%-7s last=%-10s running=%d usd_today=%.4f done=%d/%d doing=%d blocked=%d%s\n", r.Tenant, r.Enabled, r.Engine, r.Last, r.Running, r.Today, r.Done, r.Total, r.Doing, r.Blocked, tagText(r.Tags))
+	}
+	if s := archivedNote(doc.Archived); s != "" {
+		fmt.Fprintln(d.Out, s)
 	}
 	fmt.Fprintf(d.Out, "mw: schema %d via %s", doc.MW.Schema, doc.MW.Source)
 	if !schemaOK(d.MW.Schema) {

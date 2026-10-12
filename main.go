@@ -15,10 +15,10 @@ import (
 	"strings"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 var flagAliases = map[string]string{"t": "tenant", "n": "count", "j": "json", "b": "board"}
-var valueFlags = map[string]bool{"tenant": true, "count": true, "board": true, "show": true, "max-ticks": true, "last": true, "addr": true, "export": true}
+var valueFlags = map[string]bool{"tenant": true, "count": true, "board": true, "show": true, "max-ticks": true, "last": true, "addr": true, "export": true, "tag": true}
 var boolFlags = map[string]bool{"json": true, "once": true, "f": true, "web": true, "open": true}
 
 func main() {
@@ -57,7 +57,10 @@ func options(args []string) (map[string]string, []string, error) {
 			return nil, nil, fmt.Errorf("flag %s needs a value", a)
 		}
 		i++
-		o[k] = args[i]
+		if k == "tag" && o[k] != "" { // repeatable: --tag a --tag b means both
+			o[k] += ","
+		}
+		o[k] += args[i]
 	}
 	return o, pos, nil
 }
@@ -67,11 +70,12 @@ func usage(out io.Writer, topic string) error {
 		"next":    "wr next [-t TENANT] [-b BOARD_DIR]\nShow the item wr would dispatch per tenant, or why not (config, fleet, STOP/PAUSE, pause rules, caps, dirty tree, retries). Read-only.",
 		"once":    "wr once [-t TENANT] [-n COUNT] [-b BOARD_DIR]\nDispatch up to COUNT items (default 1) per enabled tenant, under the same gates as next: session, claim, engine, outcome by board.",
 		"runs":    "wr runs [-t TENANT] [-j] [--show NAME]\nList run records, or print one run and its engine log tail.",
-		"status":  "wr status [-j] [--last N]\nRead-only: live runs (age, transcript age, log), last N outcomes (default 5), stuck items, per-tenant skip/pause reasons, caps, cost by day. Never recovers or kills; shows lost? for dead runs.",
-		"ui":      "wr ui [--once] [--export PATH] [--web [--addr 127.0.0.1:5052] [--open]]\n--export PATH writes the page with its data inlined and exits.\nRead-only dashboard: live runs, tenant columns (counts, doing/blocked/ready/inbox items, pause reason), activity feed. Default is the terminal view (redraws every 3 s, q or Ctrl-C quits); --once prints one frame. --web (or config \"ui\": {\"web\": true, \"addr\": \"...\"}) also serves a page on loopback; without it no socket is opened.",
+		"status":  "wr status [-j] [--last N] [--tag T]\n--tag T (repeatable, AND) keeps tenants with every tag; archived mw tenants are hidden (counted).\nRead-only: live runs (age, transcript age, log), last N outcomes (default 5), stuck items, per-tenant skip/pause reasons, caps, cost by day. Never recovers or kills; shows lost? for dead runs.",
+		"ui":      "wr ui [--once] [--tag T] [--export PATH] [--web [--addr 127.0.0.1:5052] [--open]]\n--export PATH writes the page with its data inlined and exits.\nRead-only dashboard: live runs, tenant columns (counts, doing/blocked/ready/inbox items, pause reason), activity feed. Default is the terminal view (redraws every 3 s, q or Ctrl-C quits); --once prints one frame. --web (or config \"ui\": {\"web\": true, \"addr\": \"...\"}) also serves a page on loopback; without it no socket is opened.",
 		"log":     "wr log [-f]\nTail ~/.wr/serve.out (last 50 lines); -f follows. Without serve.out: the last runs and events.log.",
-		"doctor":  "wr doctor [-j]\nChecks: mw >= 0.2.0, a board with schema 8 (from mw version -j), config, claude --help flags per engine, the optional WR_FLEET_DIR overlap check, no-git-repo notes, WR_HOME writable, lock, disk floor. Exit 1 on any failure.",
-		"version": "wr version [-j]",
+		"doctor":  "wr doctor [-j]\nChecks: mw >= 0.2.1, a board with schema 8 (from mw version -j), config, claude --help flags per engine, the optional WR_FLEET_DIR overlap check, no-git-repo notes, WR_HOME writable, lock, disk floor. Exit 1 on any failure.",
+		"version": "wr version [-j]\nPrints the version and the releases URL; -j gives {version, min_mw, repo, releases_url}.",
+		"update":  "wr update [--check]\nReplace this wr with the latest GitHub release for this OS/CPU (checksum verified; on Windows the old binary stays as wr.exe.old). --check only reports. Exit 2 when already current. Says when mw needs updating too.",
 		"serve":   "wr serve [--once] [--max-ticks N] [-b BOARD_DIR]\nEach tick starts dispatches in the background under the caps (parallel_global, parallel_tenant, per_hour...), then returns; an ok run triggers an immediate re-tick. Exits at the next tick when ~/.wr/STOP exists (running engines finish first). Holds ~/.wr/wr.lock.",
 		"stop":    "wr stop [-t TENANT]\nWrite ~/.wr/STOP (serve exits) or ~/.wr/STOP.<tenant> (that tenant skipped).",
 		"start":   "wr start [-t TENANT]\nRemove the STOP file; with -t also clear a quality-guard pause for that tenant.",
@@ -83,12 +87,13 @@ func usage(out io.Writer, topic string) error {
 	}
 	fmt.Fprintln(out, `wr - wave rider: runs sessions that burn an mw board down
 
-  wr next | once | runs | status | ui | log | doctor | version
+  wr next | once | runs | status | ui | log | doctor | version | update [--check]
   wr serve | stop | start | service install|remove
   wr help [COMMAND]
 
-Needs mw >= 0.2.0 (schema 8). Config ~/.wr/config.json (WR_HOME overrides ~/.wr). Board dir: -b, MW_BOARD, or cwd.
-STOP files: ~/.wr/STOP (global), ~/.wr/STOP.<tenant>.`)
+Needs mw >= 0.2.1 (schema 8). Config ~/.wr/config.json (WR_HOME overrides ~/.wr). Board dir: -b, MW_BOARD, or cwd.
+STOP files: ~/.wr/STOP (global), ~/.wr/STOP.<tenant>.
+Releases: `+releasesURL+` · update: wr update`)
 	return nil
 }
 
@@ -110,6 +115,8 @@ func run(args []string, out io.Writer) error {
 		}
 	}
 	switch cmd {
+	case "update":
+		return updateCommand(out, rest)
 	case "next", "once", "runs", "status", "log", "version", "serve", "stop", "start", "service", "doctor", "ui":
 	case "role", "engines", "cost":
 		return fmt.Errorf("%q was removed (see USAGE.md)", cmd)
@@ -125,9 +132,10 @@ func run(args []string, out io.Writer) error {
 	}
 	if cmd == "version" {
 		if o["json"] == "true" {
-			return printJSON(out, map[string]string{"version": version})
+			return printJSON(out, map[string]string{"version": version, "min_mw": MinMW, "repo": "stormovermars/" + repoName, "releases_url": releasesURL})
 		}
 		fmt.Fprintln(out, "wr", version)
+		fmt.Fprintln(out, releasesURL+" · update: wr update")
 		return nil
 	}
 	home, err := wrHome()
@@ -171,8 +179,10 @@ func run(args []string, out io.Writer) error {
 	case "once":
 		return onceCommand(d, o)
 	case "status":
+		d.Tags = o["tag"]
 		return statusCommand(d, o)
 	case "ui":
+		d.Tags = o["tag"]
 		return uiCommand(d, o)
 	case "serve":
 		return serveCommand(d, o)
@@ -315,7 +325,14 @@ func lockHome(home string) (func(), error) {
 // writeLockPid records this process in wr.lock so `wr ui` can show who serves.
 // Only serve calls it; the file is truncated first, the lock itself is untouched.
 func writeLockPid(home string) {
-	_ = os.WriteFile(filepath.Join(home, "wr.lock"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+	// no truncate: on Windows the file is open and byte-range locked by lockHome; the pid is
+	// padded so a shorter pid overwrites a longer one (readLockPid trims the spaces)
+	f, err := os.OpenFile(filepath.Join(home, "wr.lock"), os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteAt([]byte(fmt.Sprintf("%-20s\n", strconv.Itoa(os.Getpid()))), 0)
+	f.Close()
 }
 
 // readLockPid returns the pid written by serve (0 when absent or unreadable).

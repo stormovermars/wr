@@ -56,3 +56,6 @@ func procStart(pid int) string {
 	}
 	return strings.Join(strings.Fields(string(out)), " ")
 }
+
+// enableVT: Unix terminals speak ANSI already.
+func enableVT() bool { return true }

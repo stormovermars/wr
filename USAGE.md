@@ -1,6 +1,6 @@
 # wr usage
 
-Build with `./build.sh` (output `build/wr`) and put it on PATH. Needs `mw` >= 0.2.0 on PATH
+Build with `./build.sh` (output `build/wr`) and put it on PATH. Needs `mw` >= 0.2.1 on PATH
 (or `MW=/path/to/mw`) and a board whose `mw version -j` reports schema 8. wr refuses to run
 (`next`, `once`, `serve`, `doctor`) on an older mw or any other schema.
 
@@ -27,8 +27,10 @@ never be enabled for one tenant.
 | `wr status [-j] [--last N]` | read-only (never recovers, settles or kills): per tenant enabled/last outcome/running/spend today/done of total/doing/blocked (one `mw list` per tenant, ready counts come from it; `wr next` names the item). Exit 1 when every enabled tenant errored; `live:` one row per running engine (tenant, item, age, transcript-mtime age, log path, `lost?` when its process is gone); `recent:` last N outcomes (default 5); `stuck:` items `doing` under a `wr-*` session with no live run; per-tenant skip/pause reason; mw schema; caps usage; `cost:` USD per engine per day; STOP files. `-j` prints `{tenants, live, recent, stuck, skips, caps, paused, cost, stop_files, mw}`. |
 | `wr ui [--once] [--web [--addr A] [--open]] [--export PATH]` | read-only dashboard, see [wr ui](#wr-ui). `--export PATH` writes the page with its data inlined and exits. |
 | `wr log [-f]` | tail `~/.wr/serve.out` (last 50 lines); `-f` follows. Without serve.out: the last runs and `events.log`. |
-| `wr doctor [-j]` | checks: mw on PATH, >= 0.2.0, schema 8; config; each enabled claude engine's flags against `claude --help` (absent ones listed, never edited; also warns on `--output-format json`); no enabled tenant is also owned by fleet-auto-dispatch; `~/.wr` writable; lock; disk floor. Exit 1 on any failure. A lock held by a running serve is reported as held. This replaces `wr engines`. |
+| `wr doctor [-j]` | checks: mw on PATH, >= 0.2.1, schema 8; config; each enabled claude engine's flags against `claude --help` (absent ones listed, never edited; also warns on `--output-format json`); no enabled tenant is also owned by fleet-auto-dispatch; `~/.wr` writable; lock; disk floor. Exit 1 on any failure. A lock held by a running serve is reported as held. This replaces `wr engines`. |
 | `wr version [-j]` | version. |
+
+The doctor update line asks GitHub at most once a day (failures count); `WR_NO_UPDATE_CHECK=1` turns it off.
 
 Board directory: `-b DIR`, else `MW_BOARD`, else the current directory (wr runs
 `mw` with that cwd). Flags: `-t` tenant, `-n` count, `-j` JSON, `-b` board.
@@ -51,7 +53,7 @@ the tenant path from `mw tenant list`), `enabled` (default false). The tenants
 `wr`, `miniwaves` and any `fleet*` are dispatched only with `self_dispatch: true`.
 
 Optional, off by default (errors are events in `events.log`, never fatal):
-`"publish": {"html": "PATH", "interval": 60}` writes the `wr ui` page with its data inlined (`wr ui --export PATH`, which always writes). After ticks and settles the page is rewritten only when its data changed (a hash is kept in `PATH.hash`) and at most every `interval` seconds (default 60, minimum 5; lower values clamp to 5, `wr doctor` says so). A change inside the interval is written at the interval's end, and a pending write is flushed when `once` or `serve` exits, so the page is never stale longer than the interval. Git is the coding agent's job: wr never runs git or a git sync command (the git sync command was removed in mw 0.2.0 and the old wr `sync` key is gone).
+`"publish": {"html": "PATH", "interval": 60}` writes the `wr ui` page with its data inlined (`wr ui --export PATH`, which always writes). After ticks and settles the page is rewritten only when its data changed (a hash is kept in `PATH.hash`) and at most every `interval` seconds (default 60, minimum 5; lower values clamp to 5, `wr doctor` says so). A change inside the interval is written at the interval's end, and a pending write is flushed when `once` or `serve` exits, so the page is never stale longer than the interval. Git is the coding agent's job: wr never runs git or a git sync command (the git sync command was removed in mw 0.2.1 and the old wr `sync` key is gone).
 The dirty-tree guard ignores `.miniwaves.json`, `.miniwaves.archive.json`, `.wr/` and the published page, so a board kept in the tenant repo does not block dispatch.
 
 ## A dispatch
@@ -103,14 +105,21 @@ The web page is opt-in: `wr ui --web [--addr 127.0.0.1:5052] [--open]`, or confi
 
 ## Changelog
 
-### 0.2.0 (mw >= 0.2.0, board schema 8)
+### 0.2.1 (mw >= 0.2.1, board schema 8)
 
-The first public release of wr after the 0.1.0 line of mw. It needs mw >= 0.2.0 (`mw next --claim --prompt`, `tenants` in `mw version -j`); run `mw migrate` on every workspace first.
+The first public release of wr (the v0.2.0 tag never produced assets) after the 0.1.0 line of mw. It needs mw >= 0.2.1 (`mw next --claim --prompt`, `tenants` in `mw version -j`); run `mw migrate` on every workspace first.
 
+- `wr update`: 120 s timeout for the downloads (5 s for the API call); asset URLs are pinned to github.com and objects.githubusercontent.com (redirects too); on Windows a failed swap restores the old exe; renames retry only on Windows (50 x 20 ms).
+- `wr doctor` checks for a new release at most once a day, failures included; `WR_NO_UPDATE_CHECK=1` turns the check off.
+- A tenant whose mw metadata cannot be read is not dispatched (fail closed); the read error is logged.
 - Dispatch path: `mw version -j` (tenants included) -> `mw list -t T -j` -> `mw next --claim -s SESSION -a ROLE --prompt -j` -> run -> `mw list -s SESSION -A -j` (+ `show` only when the item is no longer owned) -> `mw session stop -t TENANT`.
 - Session names are `wr-<tenant>-<attempt>-<6 hex>`; the retry limit is checked on the first ready item and again on the claimed one.
 - Board schema 8: `mw version -j` must report `board_schema` 8, otherwise wr refuses with the `mw migrate` hint. Git is the agent's job: wr has no sync key; the dirty-tree guard ignores `.miniwaves.*`, `.miniwaves/`, the published page and `.wr/`.
 - `wr ui` (terminal dashboard, `--web` page), `wr status`, `wr log [-f]`, `wr doctor`, `wr serve` under `parallel_global`/`parallel_tenant` caps, PAUSE/STOP files and pause rules shared by `next`, `once` and `serve`.
 - Optional `publish.html` page with data inlined, throttled to `publish.interval` seconds (default 60, minimum 5).
 - Claude Code plugin (`claude plugin marketplace add stormovermars/wr && claude plugin install wr@wr`), installers, CI (`go vet`, `go test -race`, Windows `go test`), release notes from `releases/<version>.md` when it exists.
+- Windows support: rename retry, `taskkill /T` tree kill, pid liveness and start time via `GetProcessTimes`, VT console for `wr ui`, Git Bash plugin hook, installer adds wr to the user PATH, Windows CI is a gate with the real mw (see TECHNICAL.md).
+- Tenant tags and archived tenants from `mw version -j` (mw >= 0.2.1): `wr status`, `wr ui` (terminal, `--web`, `--export`) show tags and hide archived tenants with an "archived: N tenants hidden" note; `--tag T` (repeatable, AND) on `status` and `ui`; archived tenants are never dispatched.
+- `wr update [--check]` self-update from GitHub releases (checksum verified, exit 2 when current, mw hint); `wr version` prints the releases URL (`-j`: `min_mw`, `repo`, `releases_url`); `wr doctor` says "update available" (checked once a day, quiet offline).
+- Manual stress workflow (`stress.yml`, size 40 or 1000, ubuntu/macOS/Windows) with `STRESS` summary lines.
 - Removed commands: `wr role`, `--send`, `wr engines` (now `wr doctor`), `wr once --dry` (use `wr next`), `wr cost` (now `wr status`).

@@ -77,6 +77,7 @@ type uiItem struct {
 
 type uiTenant struct {
 	Slug   string         `json:"slug"`
+	Tags   []string       `json:"tags,omitempty"`
 	Counts map[string]int `json:"counts"`
 	Done   int            `json:"done"`
 	Total  int            `json:"total"`
@@ -102,6 +103,7 @@ type uiDoc struct {
 	Runs      []uiRun    `json:"runs"`
 	Last      []uiLast   `json:"last"`
 	Tenants   []uiTenant `json:"tenants"`
+	Archived  int        `json:"archived_hidden,omitempty"` // archived tenants left out
 	Activity  []uiEvent  `json:"activity"`
 }
 
@@ -167,6 +169,7 @@ func uiData(d *Dispatcher) (*uiDoc, error) {
 			add(t.Tenant)
 		}
 	}
+	order, doc.Archived = d.shown(order)
 	reason := map[string]string{}
 	for _, s := range st.Skips {
 		reason[s.Tenant] = s.Reason
@@ -212,7 +215,7 @@ func uiData(d *Dispatcher) (*uiDoc, error) {
 	rank := map[string]int{"doing": 0, "blocked": 1, "ready": 2, "inbox": 3}
 	limit := map[string]int{"doing": 99, "blocked": 99, "ready": 6, "inbox": 3}
 	for _, t := range order {
-		ut := uiTenant{Slug: t, Counts: map[string]int{}, Reason: reason[t], Items: []uiItem{}}
+		ut := uiTenant{Slug: t, Tags: d.MW.meta(t).Tags, Counts: map[string]int{}, Reason: reason[t], Items: []uiItem{}}
 		its := append([]boardItem(nil), items[t]...)
 		sort.SliceStable(its, func(i, j int) bool { return rank[its[i].State] < rank[its[j].State] })
 		shown := map[string]int{}
@@ -296,6 +299,9 @@ func uiFrame(doc *uiDoc, width int) string {
 		fmt.Fprintf(&b, "  %-12s %-8s %-40s age %-6s transcript %-6s USD %s%s\n", r.Tenant, r.Item, clip(r.Title, 40), dur(r.AgeS), dur(r.TranscriptAge), cost, flag)
 	}
 	b.WriteString("\nTENANTS\n")
+	if s := archivedNote(doc.Archived); s != "" {
+		b.WriteString(s + "\n")
+	}
 	var blocks [][]string
 	for _, t := range doc.Tenants {
 		var cs []string
@@ -304,9 +310,9 @@ func uiFrame(doc *uiDoc, width int) string {
 				cs = append(cs, fmt.Sprintf("%s %d", s, n))
 			}
 		}
-		head := t.Slug
+		head := t.Slug + tagText(t.Tags)
 		if t.Total > 0 {
-			head = fmt.Sprintf("%s  %d/%d done", t.Slug, t.Done, t.Total)
+			head = fmt.Sprintf("%s  %d/%d done", head, t.Done, t.Total)
 		}
 		l := []string{head, strings.Join(cs, ", ")}
 		if t.Reason != "" {
@@ -432,7 +438,8 @@ func exportUIAt(d *Dispatcher, path string, force bool) (wrote bool, wait time.D
 			return false, 0, errors.Join(werr, cerr)
 		}
 		_ = os.Chmod(tmp, 0o644)
-		if err := os.Rename(tmp, f.p); err != nil {
+		if err := renameRetry(tmp, f.p); err != nil {
+			os.Remove(tmp)
 			return false, 0, err
 		}
 	}
@@ -482,11 +489,14 @@ func uiCommand(d *Dispatcher, o map[string]string) error {
 		fmt.Fprintln(os.Stderr, "wr ui: page at", url)
 		go http.Serve(ln, uiHandler(d))
 		if o["open"] == "true" {
-			bin := "open"
-			if runtime.GOOS != "darwin" {
-				bin = "xdg-open"
+			switch runtime.GOOS {
+			case "darwin":
+				_ = exec.Command("open", url).Start()
+			case "windows":
+				_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+			default:
+				_ = exec.Command("xdg-open", url).Start()
 			}
-			_ = exec.Command(bin, url).Start()
 		}
 	}
 	if o["once"] == "true" {
@@ -497,6 +507,7 @@ func uiCommand(d *Dispatcher, o map[string]string) error {
 		fmt.Fprint(d.Out, uiFrame(doc, termWidth()))
 		return nil
 	}
+	vt := d.Out != os.Stdout || enableVT()
 	quit := make(chan struct{}, 1)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -523,7 +534,11 @@ func uiCommand(d *Dispatcher, o map[string]string) error {
 		} else {
 			frame = uiFrame(doc, termWidth())
 		}
-		fmt.Fprint(d.Out, "\x1b[H\x1b[2J"+frame+"\nq to quit\n")
+		clear := "\x1b[H\x1b[2J"
+		if !vt {
+			clear = "\n" // a Windows console without VT support: frames scroll instead
+		}
+		fmt.Fprint(d.Out, clear+frame+"\nq to quit\n")
 		select {
 		case <-quit:
 			return nil

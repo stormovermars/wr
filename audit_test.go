@@ -167,6 +167,7 @@ func TestSettleBlocksEveryOwnedItemAndReportsStopFailure(t *testing.T) {
 }
 
 func TestShowFailureSettlesAsIncompleteNotForeign(t *testing.T) {
+	needShell(t)
 	r := newRig(t)
 	r.addReady("a")
 	wrap := filepath.Join(t.TempDir(), "mw")

@@ -11,7 +11,7 @@ description: Use when the user mentions wr, wave rider, the runner, "what is run
 - `wr status` shows live runs, last outcomes, stuck items, why each tenant is idle, caps and cost.
 - `wr ui --once` prints the dashboard once: live runs, tenant progress, activity.
 - `wr next` shows what would be dispatched, or why not. Read-only.
-- `wr doctor` checks mw (>= 0.2.0), the board, config, engine flags, lock and disk.
+- `wr doctor` checks mw (>= 0.2.1), the board, config, engine flags, lock and disk.
 - `wr runs --show NAME` prints one run and its log tail; `wr log` tails serve.out.
 
 ## Rules

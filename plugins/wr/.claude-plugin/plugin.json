@@ -1,6 +1,6 @@
 {
   "name": "wr",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "wr (wave rider) skill and /wr-status command; installs the wr CLI on session start.",
   "author": { "name": "stormovermars" },
   "homepage": "https://github.com/stormovermars/wr",

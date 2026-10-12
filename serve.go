@@ -197,7 +197,7 @@ func saveSeen(home string, m map[string][]string) error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, statePath(home))
+	return renameRetry(tmp, statePath(home))
 }
 
 // pauseReasons evaluates the board-derived pause rules for a tenant. The
@@ -420,6 +420,13 @@ func (s *Server) tick() (stop bool, dispatched bool, err error) {
 	for _, t := range d.Cfg.tenantsInOrder() {
 		tc := d.Cfg.Tenants[t]
 		if !tc.Enabled {
+			delete(seen, t)
+			continue
+		}
+		if mt, merr := d.MW.metaErr(t); merr != nil {
+			fmt.Fprintf(d.Out, "%s: cannot read tenant metadata: %v\n", t, merr)
+			continue
+		} else if mt.Archived {
 			delete(seen, t)
 			continue
 		}

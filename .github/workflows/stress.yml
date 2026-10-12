@@ -1,0 +1,51 @@
+name: stress
+on:
+  workflow_dispatch:
+    inputs:
+      size:
+        description: "40 (40 runners, TestFortyRunnersConcurrent) or 1000 (1000 tenants, TestThousandTenants)"
+        type: choice
+        options: ['40', '1000']
+        default: '40'
+jobs:
+  stress:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.23.x'
+      - name: Pinned mw version (MinMW)
+        id: pin
+        run: echo "mw=$(sed -n 's/.*MinMW *= *"\([0-9.]*\)".*/\1/p' mw.go)" >> "$GITHUB_OUTPUT"
+      - name: Check out miniwaves at v${{ steps.pin.outputs.mw }}
+        uses: actions/checkout@v6
+        with:
+          repository: stormovermars/miniwaves
+          ref: v${{ steps.pin.outputs.mw }}
+          path: miniwaves-src
+      - name: Build mw from source and put it on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
+          (cd miniwaves-src && go build -o "$RUNNER_TEMP/bin/mw$ext" .)
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Stress (size ${{ inputs.size }})
+        env:
+          WR_STRESS: '1'
+        run: |
+          if [ "${{ inputs.size }}" = 1000 ]; then run='TestThousandTenants'; to=40m; else run='TestFortyRunnersConcurrent'; to=20m; fi
+          set -o pipefail
+          go test -run "$run" -count=1 -v -timeout "$to" . | tee stress.log
+      - name: Summary
+        if: always()
+        run: |
+          echo "### stress size ${{ inputs.size }} on ${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
+          grep '^STRESS ' stress.log | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || echo "    no STRESS lines (see the log)" >> "$GITHUB_STEP_SUMMARY"

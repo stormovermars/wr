@@ -12,7 +12,7 @@ import (
 // failingMW: version works, every other call exits 2 (a board that cannot be read).
 func failingEnv(t *testing.T) string {
 	t.Helper()
-	m := stubMW(t, `{"version":"0.2.0","schema":8,"board_schema":8,"board":"/b/.miniwaves.json"}`)
+	m := stubMW(t, `{"version":"0.2.1","schema":8,"board_schema":8,"board":"/b/.miniwaves.json"}`)
 	tdir := filepath.Join(m.Board, "tenant")
 	os.MkdirAll(tdir, 0o755)
 	sh(t, tdir, "git", "init", "-q")
@@ -58,6 +58,7 @@ func TestNextAndStatusExitOneWhenEveryTenantErrored(t *testing.T) {
 func ptr(s string) *string { return &s }
 
 func TestClaimNextCarriesPromptVerbatim(t *testing.T) {
+	needShell(t)
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "mw")
 	os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' '{\"id\":\"T-1\",\"title\":\"x\",\"claimed\":true,\"prompt\":\"P line1\\nLoop: x\"}'\n"), 0o755)

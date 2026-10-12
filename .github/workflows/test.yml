@@ -20,6 +20,9 @@ jobs:
           ./scripts/install-mw.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - run: go vet ./...
+      - name: Cross-build every release target
+        if: runner.os == 'Linux'
+        run: for t in windows/amd64 windows/arm64 darwin/arm64 linux/amd64; do GOOS=${t%/*} GOARCH=${t#*/} go vet ./... && GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null .; done
       - run: go test ./...
       - run: go test -race ./...
       - name: Test source lifecycle
@@ -36,19 +39,20 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/stormovermars/wr/main/install.sh | WR_INSTALL_DIR="$RUNNER_TEMP/wr-bin" sh
           "$RUNNER_TEMP/wr-bin/wr" version
-  windows:
+  windows: # a hard gate: the real-mw rig tests run here too
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v7
         with:
           go-version: '1.23.x'
+      - name: Install mw (the release wr is tested against)
+        shell: bash
+        run: |
+          ./scripts/install-mw.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - run: go vet ./...
-      - name: go test (allowed to fail: no mw on this runner, so the rig tests skip)
-        continue-on-error: true
-        env:
-          CI: ''
-        run: go test ./...
+      - run: go test ./... # -race needs cgo; the macOS/Linux jobs run it
       - name: Build and lifecycle
         shell: pwsh
         run: |
@@ -60,3 +64,11 @@ jobs:
           New-Item -ItemType File -Path (Join-Path $env:WR_INSTALL_DIR "wr.exe") | Out-Null
           ./uninstall.ps1
           if (Test-Path (Join-Path $env:WR_INSTALL_DIR "wr.exe")) { throw "uninstall failed" }
+      - name: Test published installer
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $env:WR_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "wr-bin"
+          $env:WR_NO_PATH = "1"
+          Invoke-RestMethod https://raw.githubusercontent.com/stormovermars/wr/main/install.ps1 | Invoke-Expression
+          & (Join-Path $env:WR_INSTALL_DIR "wr.exe") version

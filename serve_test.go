@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -119,7 +118,7 @@ func TestTenantSTOPFile(t *testing.T) {
 // liveGroup starts a sleep in its own process group, to count as a live run.
 func liveGroup(t *testing.T) int {
 	t.Helper()
-	c := exec.Command("sleep", "60")
+	c := sleepCmd(60)
 	setProcGroup(c)
 	if err := c.Start(); err != nil {
 		t.Fatal(err)
@@ -208,6 +207,7 @@ func TestPauseBlockedItem(t *testing.T) {
 
 // writeBoard writes a board file of the given schema; fakeMW prints list JSON.
 func fakeBoard(t *testing.T, schema int, listJSON string) *MW {
+	needShell(t)
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".miniwaves.json"), []byte(`{"version":`+strconv.Itoa(schema)+`}`), 0o644); err != nil {

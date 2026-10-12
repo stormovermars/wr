@@ -12,7 +12,7 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 10px
 .pill{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;border:1px solid var(--line);color:var(--mut)}
 .pill.doing{background:var(--acc);border-color:var(--acc);color:var(--bg)}.pill.blocked{color:var(--red);border-color:var(--red)}
 .pill.inbox{color:var(--amb);border-color:var(--amb)}.pill.on{color:var(--grn);border-color:var(--grn)}.pill.off{color:var(--mut)}
-.grn{color:var(--grn)}.amb{color:var(--amb)}.red{color:var(--red)}.mut{color:var(--mut)}
+.grn{color:var(--grn)}.amb{color:var(--amb)}.red{color:var(--red)}.mut{color:var(--mut)}.tag{font-size:11px;font-weight:400;border:1px solid var(--mut);border-radius:8px;padding:0 6px;margin-left:4px}
 #tenants{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .col{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}
 .col h3{margin:0;font-size:14px}.row{display:flex;gap:8px;align-items:baseline;padding:2px 0}.row span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -22,7 +22,7 @@ table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 10px
 <header><b>wr</b><span id="serve" class="pill"></span><span id="caps"></span><span id="cost"></span><span id="ref" class="mut"></span></header>
 <main>
 <section><h2>Live runs</h2><table id="runs"></table></section>
-<section><h2>Tenants</h2><div id="tenants"></div></section>
+<section><h2>Tenants</h2><div id="archived" class="mut"></div><div id="tenants"></div></section>
 <section><h2>Activity</h2><div id="feed"></div></section>
 </main>
 <script>
@@ -39,9 +39,10 @@ function render(d){
   $('runs').innerHTML=d.runs.length?'<tr><th>tenant<th>item<th>title<th>age<th>transcript<th>USD</tr>'+d.runs.map(r=>{
     const c=r.lost?'red':(r.transcript_age_s>=0&&r.transcript_age_s<60?'grn':'amb');
     return `<tr><td>${esc(r.tenant)}<td class="id">${esc(r.item)}<td>${esc(r.title)}<td>${dur(r.age_s)}<td class="${c}">${dur(r.transcript_age_s)}${r.lost?' lost?':''}<td>${r.cost==null?'-':r.cost.toFixed(2)}</tr>`}).join(''):'<tr><td class="mut">none running</tr>';
+  $('archived').textContent=d.archived_hidden?`archived: ${d.archived_hidden} tenant${d.archived_hidden>1?'s':''} hidden`:'';
   $('tenants').innerHTML=d.tenants.map(t=>{
     const cs=['doing','ready','blocked','inbox','done'].filter(s=>t.counts[s]).map(s=>s+' '+t.counts[s]).join(' · ');
-    return `<div class="col"><h3>${esc(t.slug)}${t.total?` <span class="mut">${t.done}/${t.total} done</span>`:''}</h3><div class="mut">${esc(cs)}</div>${t.reason?`<div class="mut">${esc(t.reason)}</div>`:''}`+
+    return `<div class="col"><h3>${esc(t.slug)}${(t.tags||[]).map(g=>` <span class="tag">${esc(g)}</span>`).join('')}${t.total?` <span class="mut">${t.done}/${t.total} done</span>`:''}</h3><div class="mut">${esc(cs)}</div>${t.reason?`<div class="mut">${esc(t.reason)}</div>`:''}`+
       t.items.map(i=>`<div class="row"><span class="pill ${i.state}">${i.state}</span><span class="id">${esc(i.id)}</span><span class="t">${esc(i.title)}</span></div>`).join('')+
       (t.more?`<div class="mut">+${t.more} more</div>`:'')+'</div>'}).join('');
   $('feed').innerHTML=d.activity.map(e=>`<div><span class="mut">${esc(new Date(e.ts).toLocaleString([],{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}))}</span> ${esc(e.tenant)} ${esc(e.item)} ${esc(e.action)} <span class="mut">${esc(e.by)} ${esc(e.note)}</span></div>`).join('');

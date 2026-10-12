@@ -179,7 +179,7 @@ func saveConfig(home string, c *Config) error {
 	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, configPath(home))
+	return renameRetry(tmp, configPath(home))
 }
 
 func (c *Config) timeout() int64 {

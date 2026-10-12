@@ -30,9 +30,14 @@ try {
     Expand-Archive -Force $archive $temp
     Copy-Item -Force (Join-Path $temp "wr.exe") (Join-Path $dest "wr.exe")
     Write-Output "installed wr to $(Join-Path $dest 'wr.exe')"
-    if (($env:PATH -split ";") -notcontains $dest) {
-        Write-Output "add $dest to PATH"
+    # Put $dest on the user PATH (persisted for new shells, and for this one).
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $parts = @($userPath -split ";" | Where-Object { $_ })
+    if (-not $env:WR_NO_PATH -and ($parts | ForEach-Object { $_.TrimEnd("\") }) -notcontains $dest.TrimEnd("\")) {
+        [Environment]::SetEnvironmentVariable("Path", (($parts + $dest) -join ";"), "User")
+        Write-Output "added $dest to the user PATH (open a new terminal to use wr)"
     }
+    if (($env:PATH -split ";") -notcontains $dest) { $env:PATH = "$env:PATH;$dest" }
 } finally {
     if (Test-Path $temp) { Remove-Item -Recurse -Force $temp }
 }

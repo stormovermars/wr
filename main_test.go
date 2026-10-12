@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,11 +19,20 @@ import (
 var fakeBin, mwBin string
 
 func TestMain(m *testing.M) {
+	if s := os.Getenv("WR_TEST_SLEEP"); s != "" { // sleepCmd: a portable `sleep N`
+		n, _ := strconv.Atoi(s)
+		time.Sleep(time.Duration(n) * time.Second)
+		os.Exit(0)
+	}
+	releaseAPI = "http://127.0.0.1:1/latest" // tests never reach GitHub (doctor's update check stays quiet)
 	dir, err := os.MkdirTemp("", "wr-fake")
 	if err != nil {
 		panic(err)
 	}
 	fakeBin = filepath.Join(dir, "fakeengine")
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
 	if out, err := exec.Command("go", "build", "-o", fakeBin, "./testdata/fakeengine").CombinedOutput(); err != nil {
 		panic(string(out))
 	}
@@ -295,7 +305,7 @@ func TestLostRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	// a live-PID run is left alone
-	lp := exec.Command("sleep", "30")
+	lp := sleepCmd(30)
 	setProcGroup(lp)
 	if err := lp.Start(); err != nil {
 		t.Fatal(err)
@@ -494,7 +504,7 @@ func TestEngineEnvDropsMWBoard(t *testing.T) {
 
 func TestOverdueLiveGroupIsKilledAndLost(t *testing.T) {
 	r := newRig(t)
-	lp := exec.Command("sleep", "30")
+	lp := sleepCmd(30)
 	setProcGroup(lp)
 	if err := lp.Start(); err != nil {
 		t.Fatal(err)
@@ -510,5 +520,22 @@ func TestOverdueLiveGroupIsKilledAndLost(t *testing.T) {
 	_ = lp.Wait()
 	if groupAlive(lp.Process.Pid) {
 		t.Fatal("overdue group survived")
+	}
+}
+
+// sleepCmd is `sleep secs` as a child process on every OS (Windows has no sleep binary):
+// the test binary re-executed in WR_TEST_SLEEP mode.
+func sleepCmd(secs int) *exec.Cmd {
+	c := exec.Command(os.Args[0], "-test.run=^$")
+	c.Env = append(os.Environ(), "WR_TEST_SLEEP="+strconv.Itoa(secs))
+	return c
+}
+
+// needShell skips a test whose fake mw is a #!/bin/sh script: Windows cannot exec one.
+// Those tests cover schema, doctor and pause logic that has no OS-specific code.
+func needShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake mw is a #!/bin/sh script; Windows cannot exec it (logic is OS-independent, covered on macOS/Linux)")
 	}
 }

@@ -69,7 +69,7 @@ func writeRun(home string, r *Run) error {
 	if err := os.WriteFile(p+".tmp", b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(p+".tmp", p)
+	return renameRetry(p+".tmp", p)
 }
 
 func readRuns(home, tenant string) ([]*Run, error) {
@@ -285,7 +285,8 @@ type Dispatcher struct {
 	Sleep func(time.Duration) // nil = wait on Ctx (tests)
 	Tick  time.Duration       // nonzero overrides tick_min (tests)
 
-	Ctx context.Context // serve cancels it on SIGTERM/SIGINT; nil = never
+	Ctx  context.Context // serve cancels it on SIGTERM/SIGINT; nil = never
+	Tags string          // --tag filter for status and ui (comma-joined, AND)
 
 	hookMu     sync.Mutex // serializes the published page
 	pubPending bool       // a change waits for the interval to end
@@ -481,7 +482,7 @@ func gitDirty(dir string, ignore ...string) (bool, error) {
 			if err != nil {
 				return false
 			}
-			top := strings.TrimSpace(string(out))
+			top := filepath.FromSlash(strings.TrimSpace(string(out))) // C:/x on Windows
 			if r, err := filepath.EvalSymlinks(top); err == nil {
 				top = r
 			}
@@ -621,6 +622,13 @@ func (d *Dispatcher) planMode(slug string, peek bool) (*NextItem, string, error)
 	}
 	if !tc.Enabled {
 		return nil, "not enabled", nil
+	}
+	mt, merr := d.MW.metaErr(slug)
+	if merr != nil {
+		return nil, "", fmt.Errorf("cannot read tenant metadata: %w", merr) // fail closed
+	}
+	if mt.Archived {
+		return nil, "archived in mw (mw tenant restore " + slug + ")", nil
 	}
 	if isSelfTenant(slug) && !d.Cfg.SelfDispatch {
 		return nil, "self-dispatch off (self_dispatch: false)", nil
@@ -1012,7 +1020,7 @@ func (d *Dispatcher) settleRec(r *Run, why string) {
 func engineEnv(base []string, extra ...string) []string {
 	var out []string
 	for _, e := range base {
-		if strings.HasPrefix(e, "MW_BOARD=") || strings.HasPrefix(e, "MW_SESSION=") || strings.HasPrefix(e, "MW_TENANT=") {
+		if envKeyIs(e, "MW_BOARD") || envKeyIs(e, "MW_SESSION") || envKeyIs(e, "MW_TENANT") {
 			continue
 		}
 		out = append(out, e)

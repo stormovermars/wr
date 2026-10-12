@@ -88,10 +88,22 @@ Tests inject `Dispatcher.Now`/`Sleep`, call `Server.tick` directly, and point
 
 ## Windows
 
-`proc_windows.go`: the lock is `LockFileEx` (one byte at offset 1<<30, so the pid text stays readable) and free disk is `GetDiskFreeSpaceEx`, both via `syscall.NewLazyDLL` (stdlib only). Job-object group kill, service install and process start time are not implemented (the engine process is killed, not its tree).
+`proc_windows.go` (stdlib `syscall` only):
+- Lock: `LockFileEx` on one byte at offset 1<<30, so the pid text stays readable; `writeLockPid` overwrites the pid in place (padded, no truncate) because the file is open and locked.
+- Engines: argv arrays, never a shell (no `sh -c` anywhere), so the same config works on Windows with `"cmd": ["claude.exe", ...]` or any `.exe`; a `.cmd`/`.bat` wrapper needs `["cmd", "/C", "x.cmd", ...]`.
+- Kill: no process groups; `killGroup` runs `taskkill /T /F /PID` (the engine's process tree), falling back to killing the engine alone. Caveat: a grandchild whose parent already exited is no longer reachable from the engine pid.
+- Liveness: `OpenProcess` + `GetExitCodeProcess == STILL_ACTIVE`; `procStart` is the `GetProcessTimes` creation time (RFC 3339), guarding PID reuse like `ps -o lstart` does on Unix.
+- Writes: tmp + `renameRetry` (20 x 10 ms) because a rename over a file another process holds open fails with a sharing violation; env keys compare case-insensitively.
+- `wr ui`: `SetConsoleMode(ENABLE_VIRTUAL_TERMINAL_PROCESSING)`; without it frames scroll instead of redrawing. `stty` does not exist, so `q` does not quit (Ctrl-C does) and the width falls back to `COLUMNS` or 100. `--open` uses `rundll32 url.dll,FileProtocolHandler`.
+- Not on Windows: `wr service` (prints "run wr serve by hand"), desktop notifications.
+- Tests: the `#!/bin/sh` fake-mw tests skip on Windows (schema/doctor/pause logic, no OS code); everything on the real mw (claims, locks, dispatch, stress) runs there. `sleep` children are the test binary itself (`WR_TEST_SLEEP`).
+
+## Stress workflow
+
+`.github/workflows/stress.yml` (manual, `workflow_dispatch`, input `size` 40 or 1000) runs on ubuntu, macOS and Windows. Each job builds mw from `stormovermars/miniwaves` at `v<MinMW>` (no release asset needed), puts it on PATH and runs `WR_STRESS=1 go test -run TestFortyRunnersConcurrent` (size 40, 20 min) or `TestThousandTenants` (size 1000, 40 min). Every variant prints `STRESS <variant> done=<n>/<n> dup=<n> timeouts=<n> p50=<ms> p95=<ms> wall=<s>`; the job copies those lines to the step summary. Locally: `WR_STRESS=1 go test -run TestFortyRunnersConcurrent -v -count=1 . | grep ^STRESS`.
 
 
-- Schema comes from `mw version -j` (`{version, schema}`); mw < 0.2.0 or schema != 8 is refused (`checkVersion`/`requireSchema`), no fallback.
+- Schema comes from `mw version -j` (`{version, schema}`); mw < 0.2.1 or schema != 8 is refused (`checkVersion`/`requireSchema`), no fallback.
 - `serve` runs under `signal.NotifyContext(SIGTERM, SIGINT)`: a cancel kills the engine's process group, blocks the item and marks the run `incomplete`, then serve exits; the inter-tick sleep wakes on cancel.
 - The quality-guard baseline (`state.json`) is not advanced when the PAUSE file cannot be written, so the trip is re-found next tick; disabled tenants are dropped from `state.json`.
 - `disk_free_gb` fails closed: if free space cannot be read, dispatch is skipped with the reason printed. Service files carry `PATH` (install-time plus the dirs of `mw` and the engines) and launchd `KeepAlive` restarts only on non-zero exit.

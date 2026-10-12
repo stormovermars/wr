@@ -139,6 +139,9 @@ func doctorCommand(out io.Writer, home string, o map[string]string) error {
 		add("disk", free >= float64(floor), fmt.Sprintf("%.1f GB free (floor %d)", free, floor))
 	}
 
+	if s := updateNotice(home); s != "" {
+		add("update", true, s)
+	}
 	failed := 0
 	for _, c := range cs {
 		if !c.OK {

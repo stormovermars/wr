@@ -143,7 +143,7 @@ func (m *MW) must(args ...string) (string, error) {
 const (
 	MinSchema = 8
 	MaxSchema = 8
-	MinMW     = "0.2.0"
+	MinMW     = "0.2.1"
 )
 
 func schemaOK(s int) bool { return s >= MinSchema && s <= MaxSchema }
@@ -180,9 +180,11 @@ func (m *MW) checkVersion() error {
 		BoardSchema *int    `json:"board_schema"`
 		Board       *string `json:"board"`
 		Tenants     []struct {
-			Slug string `json:"slug"`
-			Name string `json:"name"`
-			Dir  string `json:"dir"`
+			Slug     string   `json:"slug"`
+			Name     string   `json:"name"`
+			Dir      string   `json:"dir"`
+			Tags     []string `json:"tags"`
+			Archived bool     `json:"archived"`
 		} `json:"tenants"`
 	}
 	if r.Code != 0 || json.Unmarshal([]byte(r.Out), &v) != nil || v.Schema == nil {
@@ -198,7 +200,7 @@ func (m *MW) checkVersion() error {
 	m.mu.Lock()
 	m.tens = nil
 	for _, t := range v.Tenants {
-		m.tens = append(m.tens, MWTenant{Tenant: t.Slug, Name: t.Name, Path: t.Dir})
+		m.tens = append(m.tens, MWTenant{Tenant: t.Slug, Name: t.Name, Path: t.Dir, Tags: t.Tags, Archived: t.Archived})
 	}
 	m.mu.Unlock()
 	if semverLess(v.Version, MinMW) {
@@ -219,9 +221,11 @@ func (m *MW) requireSchema() error {
 }
 
 type MWTenant struct {
-	Tenant string `json:"tenant"`
-	Name   string `json:"name"`
-	Path   string `json:"path"`
+	Tenant   string   `json:"tenant"`
+	Name     string   `json:"name"`
+	Path     string   `json:"path"`
+	Tags     []string `json:"tags,omitempty"`
+	Archived bool     `json:"archived,omitempty"`
 }
 
 // tenants come from `mw version -j` (no extra call); an mw that does not list

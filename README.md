@@ -10,12 +10,16 @@ Claude Code plugin (installs the CLI too):
 claude plugin marketplace add stormovermars/wr && claude plugin install wr@wr
 ```
 
-Or the CLI alone (needs mw >= 0.2.0):
+Or the CLI alone (needs mw >= 0.2.1):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/stormovermars/wr/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/stormovermars/wr/main/install.sh | sh   # macOS, Linux
+irm https://raw.githubusercontent.com/stormovermars/wr/main/install.ps1 | iex        # Windows
 go install github.com/stormovermars/wr@latest
 ```
+
+Update: `wr update` (`--check` only reports; it also says when mw needs `mw update`), or re-run the plugin/install one-liner.
+Windows 10/11 runs natively (engines are argv arrays, no shell; process trees are killed with `taskkill /T`); see [TECHNICAL.md#windows](TECHNICAL.md#windows).
 
 ## Use
 

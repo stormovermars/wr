@@ -231,6 +231,13 @@ func runStress(t *testing.T, label string, tenants []string, items int, assign [
 	}
 	sort.Strings(verbs)
 	t.Logf("%s: per-call mw timings under load: %s", label, strings.Join(verbs, " | "))
+	dup := 0
+	for _, n := range doneEvents {
+		if n != 1 {
+			dup++
+		}
+	}
+	stressLine(strings.NewReplacer(", ", "-", " ", "-").Replace(label), done, total, dup, res.lockWaits, res.lat, res.wall)
 	t.Logf("%s: %d runners, %d tenants x %d items; dispatches per runner %v; %d total; mw calls/dispatch %.1f; dispatch latency p50 %s p95 %s; lock-timeout retries %d; wall %s",
 		label, len(runners), len(tenants), items, res.dispatches, nd, per,
 		pct(res.lat, .5).Round(time.Millisecond), pct(res.lat, .95).Round(time.Millisecond), res.lockWaits, res.wall.Round(time.Millisecond))
@@ -456,7 +463,14 @@ func TestThousandTenants(t *testing.T) {
 	t.Logf("1000 tenants: board %d KB in 1001 files; %s", boardSize/1024, idle)
 	t.Logf("1000 tenants: %d runners on all tenants; %d dispatches; %d/%d done, %d not exactly-once or left doing; lock timeouts %d; dispatch p50 %s p95 %s; wall %s; under load: %s",
 		nR, nd, done, nT*perT, bad, res.lockWaits, pct(res.lat, .5).Round(time.Millisecond), pct(res.lat, .95).Round(time.Millisecond), wall.Round(time.Second), strings.Join(vs, " | "))
+	stressLine("1000-tenants", done, nT*perT, bad, res.lockWaits, res.lat, wall)
 	if done != nT*perT || bad > 0 || res.lockWaits > 0 || len(res.errs) > 0 {
 		t.Errorf("done %d/%d bad %d lock timeouts %d errs %d %v", done, nT*perT, bad, res.lockWaits, len(res.errs), res.errs[:min(3, len(res.errs))])
 	}
+}
+
+// stressLine prints the one-line summary the stress workflow copies to $GITHUB_STEP_SUMMARY.
+func stressLine(variant string, done, total, dup int, timeouts int64, lat []time.Duration, wall time.Duration) {
+	fmt.Printf("STRESS %s done=%d/%d dup=%d timeouts=%d p50=%d p95=%d wall=%.0f\n", variant, done, total, dup, timeouts,
+		pct(lat, .5).Milliseconds(), pct(lat, .95).Milliseconds(), wall.Seconds())
 }
