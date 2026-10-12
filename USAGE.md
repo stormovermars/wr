@@ -105,8 +105,9 @@ The web page is opt-in: `wr ui --web [--addr 127.0.0.1:5052] [--open]`, or confi
 
 ## Changelog
 
-### 0.2.2 (unreleased; mw >= 0.2.1, board schema 8)
+### 0.2.2 (mw >= 0.2.1, board schema 8)
 
+- `mw session stop` after a run is retried on lock-wait timeouts and up to 2 transient failures; a `stop-failed` event fails the stress tests. Windows: run records, config, state and page files are replaced with a POSIX-semantics rename.
 - A claim (`mw next --claim`) that fails because mw's board-lock wait timed out (`board locked (pid P) ...`) is retried up to 3 times after a jittered 1-2 s pause before the dispatch counts an error; nothing was claimed, so the repeat is safe. Each timeout still counts in the lock-wait tally. Works with mw 0.2.1's message; mw 0.2.2 also lets you raise its wait with `MW_LOCK_WAIT` (seconds; default 5, 15 on Windows).
 - A failing mw call with an empty stderr now reports its exit code (in hex too, so a Windows NTSTATUS such as `0xC0000142` is recognisable) instead of an empty reason.
 - Stress tests: lock-wait timeouts that a retry absorbed are reported, not failed; done counts and zero errors are still required.
