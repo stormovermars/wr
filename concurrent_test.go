@@ -206,7 +206,7 @@ func runStress(t *testing.T, label string, tenants []string, items int, assign [
 		t.Errorf("%s: %s", label, e)
 	}
 	for _, d := range runners {
-		if b, _ := os.ReadFile(filepath.Join(d.Home, "events.log")); strings.Contains(string(b), "error") || strings.Contains(string(b), "lock") {
+		if b, _ := os.ReadFile(filepath.Join(d.Home, "events.log")); strings.Contains(string(b), "error") || strings.Contains(string(b), "lock") || strings.Contains(string(b), "stop-failed") {
 			t.Errorf("%s: events.log of %s:\n%s", label, d.Home, b)
 		}
 		rs, _ := readRuns(d.Home, "")

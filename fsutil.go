@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -12,16 +11,16 @@ import (
 var (
 	renameTries   = 50
 	renameBackoff = 20 * time.Millisecond
-	renameFn      = os.Rename
+	renameFn      = replaceFile
 	// renameRetryOn: only Windows has transient sharing violations; elsewhere one attempt.
 	renameRetryOn = runtime.GOOS == "windows"
 )
 
-// renameRetry renames tmp over path, retrying a failed rename (50 x 20 ms). On Windows
-// a rename over a file another process has open (wr ui or a reader of runs/config, an
-// antivirus scan) fails with ERROR_ACCESS_DENIED or a sharing violation until that handle
-// closes: Go opens files without FILE_SHARE_DELETE. os.Rename already uses MoveFileEx with
-// MOVEFILE_REPLACE_EXISTING there. A missing tmp is not retried.
+// renameRetry renames tmp over path (replaceFile), retrying a failed rename (50 x 20 ms).
+// On Windows replaceFile uses the POSIX rename, which replaces a target that readers hold
+// open with FILE_SHARE_DELETE; a handle without it (os.ReadFile in wr ui or a reader of
+// runs/config, an antivirus scan) still refuses until it closes, hence the retries.
+// A missing tmp is not retried.
 func renameRetry(tmp, path string) error {
 	var err error
 	tries := renameTries

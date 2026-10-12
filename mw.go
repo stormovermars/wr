@@ -374,10 +374,19 @@ func (m *MW) sessionItems(name string) ([]sessionItem, error) {
 	return v.Items, json.Unmarshal([]byte(out), &v)
 }
 
+// sessionStop stops the session; a lock timeout or a transient failure (a Windows rename
+// refused while another process reads the tenant file) is retried, so a settled run never
+// leaves its session idle. A refusal (still owns an item, unknown session) is not retried.
 func (m *MW) sessionStop(tenant, name string) error {
-	// -t keeps the command on one tenant file (no lock on every tenant)
-	_, err := m.must("session", "stop", name, "-t", tenant)
-	return err
+	var err error
+	for i := 0; ; i++ {
+		// -t keeps the command on one tenant file (no lock on every tenant)
+		_, err = retryLock(func() (string, error) { return m.must("session", "stop", name, "-t", tenant) })
+		if err == nil || i >= 2 || strings.Contains(err.Error(), "still owns") || strings.Contains(err.Error(), "not found") {
+			return err
+		}
+		time.Sleep(retryDelay)
+	}
 }
 
 func (m *MW) block(tenant, id, text, name string) error {
