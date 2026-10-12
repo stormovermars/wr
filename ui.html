@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wr ui</title>
+<style>
+:root{--bg:#fff;--fg:#1d2127;--mut:#6b7380;--line:#dfe3e8;--card:#f6f7f9;--acc:#2563eb;--red:#c62828;--amb:#b26a00;--grn:#1b7a3d}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e4e7eb;--mut:#8b94a1;--line:#2a3038;--card:#1b2026;--acc:#6ea0ff;--red:#ff7b72;--amb:#e3a73a;--grn:#4cc474}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+main{padding:12px 16px;display:grid;gap:20px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 6px}
+table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:4px 10px 4px 0;border-bottom:1px solid var(--line)}
+.pill{display:inline-block;padding:0 8px;border-radius:10px;font-size:12px;border:1px solid var(--line);color:var(--mut)}
+.pill.doing{background:var(--acc);border-color:var(--acc);color:var(--bg)}.pill.blocked{color:var(--red);border-color:var(--red)}
+.pill.inbox{color:var(--amb);border-color:var(--amb)}.pill.on{color:var(--grn);border-color:var(--grn)}.pill.off{color:var(--mut)}
+.grn{color:var(--grn)}.amb{color:var(--amb)}.red{color:var(--red)}.mut{color:var(--mut)}
+#tenants{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.col{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}
+.col h3{margin:0;font-size:14px}.row{display:flex;gap:8px;align-items:baseline;padding:2px 0}.row span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.id{font-family:ui-monospace,monospace;cursor:pointer}
+#feed{font:12px ui-monospace,monospace;white-space:pre-wrap}#feed div{padding:1px 0}
+</style></head><body>
+<header><b>wr</b><span id="serve" class="pill"></span><span id="caps"></span><span id="cost"></span><span id="ref" class="mut"></span></header>
+<main>
+<section><h2>Live runs</h2><table id="runs"></table></section>
+<section><h2>Tenants</h2><div id="tenants"></div></section>
+<section><h2>Activity</h2><div id="feed"></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dur=s=>s<0?'-':s<90?s+'s':s<5400?Math.round(s/60)+'m':Math.floor(s/3600)+'h'+String(Math.floor(s%3600/60)).padStart(2,'0')+'m';
+let last=0,stale=false;
+function render(d){
+  const sv=$('serve');sv.textContent='serve '+(d.serve.running?'running'+(d.serve.pid?' (pid '+d.serve.pid+')':''):'not running')+(d.serve.stop_files.length?' (STOP)':'');
+  sv.className='pill '+(d.serve.running?'on':'off');
+  $('caps').textContent=`live ${d.caps.global.in_use}/${d.caps.global.limit} · ${d.caps.per_hour.in_use}/${d.caps.per_hour.limit} per hour`;
+  const week=Object.values(d.cost.last7).reduce((a,b)=>a+b,0);
+  $('cost').textContent=`USD ${d.cost.today.toFixed(2)} today · ${week.toFixed(2)} 7d`;
+  $('runs').innerHTML=d.runs.length?'<tr><th>tenant<th>item<th>title<th>age<th>transcript<th>USD</tr>'+d.runs.map(r=>{
+    const c=r.lost?'red':(r.transcript_age_s>=0&&r.transcript_age_s<60?'grn':'amb');
+    return `<tr><td>${esc(r.tenant)}<td class="id">${esc(r.item)}<td>${esc(r.title)}<td>${dur(r.age_s)}<td class="${c}">${dur(r.transcript_age_s)}${r.lost?' lost?':''}<td>${r.cost==null?'-':r.cost.toFixed(2)}</tr>`}).join(''):'<tr><td class="mut">none running</tr>';
+  $('tenants').innerHTML=d.tenants.map(t=>{
+    const cs=['doing','ready','blocked','inbox','done'].filter(s=>t.counts[s]).map(s=>s+' '+t.counts[s]).join(' · ');
+    return `<div class="col"><h3>${esc(t.slug)}${t.total?` <span class="mut">${t.done}/${t.total} done</span>`:''}</h3><div class="mut">${esc(cs)}</div>${t.reason?`<div class="mut">${esc(t.reason)}</div>`:''}`+
+      t.items.map(i=>`<div class="row"><span class="pill ${i.state}">${i.state}</span><span class="id">${esc(i.id)}</span><span class="t">${esc(i.title)}</span></div>`).join('')+
+      (t.more?`<div class="mut">+${t.more} more</div>`:'')+'</div>'}).join('');
+  $('feed').innerHTML=d.activity.map(e=>`<div><span class="mut">${esc(new Date(e.ts).toLocaleString([],{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}))}</span> ${esc(e.tenant)} ${esc(e.item)} ${esc(e.action)} <span class="mut">${esc(e.by)} ${esc(e.note)}</span></div>`).join('');
+}
+async function poll(){
+  try{const r=await fetch('/api',{cache:'no-store'});if(!r.ok)throw 0;render(await r.json());last=Date.now();stale=false}catch(e){stale=true}
+  tick();
+}
+function tick(){$('ref').textContent=last?`refreshed ${Math.round((Date.now()-last)/1000)} s ago`+(stale?' · stale':''):(stale?'stale':'loading');}
+document.addEventListener('click',e=>{if(e.target.classList.contains('id'))navigator.clipboard?.writeText(e.target.textContent)});
+if(window.__WR_DATA__){render(window.__WR_DATA__);$('ref').textContent='snapshot '+new Date(window.__WR_DATA__.refreshed).toLocaleString()}else{poll();setInterval(poll,3000);setInterval(tick,1000)}
+</script></body></html>

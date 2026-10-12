@@ -1,0 +1,48 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.23.x'
+      - name: Install mw (Linux asset of the miniwaves release, checksum verified)
+        run: |
+          ./scripts/install-mw.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go test -race ./...
+      - name: Build release archives
+        run: |
+          mkdir dist
+          for os in darwin linux; do
+            os_label=Linux; [ "$os" = darwin ] && os_label=Darwin
+            for arch in arm64 amd64; do
+              arch_label="$arch"; [ "$arch" = amd64 ] && arch_label=x86_64
+              GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o wr .
+              tar -czf "dist/wr_${os_label}_${arch_label}.tar.gz" wr LICENSE THIRD_PARTY_NOTICES.md
+            done
+          done
+          for arch in arm64 amd64; do
+            arch_label="$arch"; [ "$arch" = amd64 ] && arch_label=x86_64
+            GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o wr.exe .
+            zip -q "dist/wr_Windows_${arch_label}.zip" wr.exe LICENSE THIRD_PARTY_NOTICES.md
+          done
+          cd dist && sha256sum * > checksums.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="releases/${GITHUB_REF_NAME#v}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" dist/* --notes-file "$notes"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+          fi

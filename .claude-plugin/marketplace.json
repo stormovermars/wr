@@ -1,0 +1,12 @@
+{
+  "name": "wr",
+  "description": "wr: wave rider, the runner that burns a miniwaves board down.",
+  "owner": { "name": "stormovermars" },
+  "plugins": [
+    {
+      "name": "wr",
+      "source": "./plugins/wr",
+      "description": "Check what wr is running (wr status, wr ui) and run wr doctor; installs the wr CLI on session start."
+    }
+  ]
+}
