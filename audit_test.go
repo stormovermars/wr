@@ -299,7 +299,7 @@ func TestLogCommandAndTranscriptKey(t *testing.T) {
 	}
 	projectsDirOverride = "/p"
 	defer func() { projectsDirOverride = "" }()
-	if got := transcriptPath("/no/such/My.dir/x_y", "U"); got != "/p/-no-such-My-dir-x-y/U.jsonl" {
+	if got := transcriptPath("/no/such/My.dir/x_y", "U"); got != filepath.Join("/p", "-no-such-My-dir-x-y", "U.jsonl") {
 		t.Fatal(got)
 	}
 }

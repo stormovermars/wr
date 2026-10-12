@@ -432,7 +432,7 @@ func TestServiceFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"<string>ro.nfnt.wr</string>", "<string>serve</string>", "<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>", "<key>PATH</key><string>", "/opt/marker/bin:/usr/bin", home + "/serve.out", home + "/serve.err", "<key>WR_HOME</key>"} {
+	for _, w := range []string{"<string>ro.nfnt.wr</string>", "<string>serve</string>", "<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>", "<key>PATH</key><string>", "/opt/marker/bin:/usr/bin", filepath.Join(home, "serve.out"), filepath.Join(home, "serve.err"), "<key>WR_HOME</key>"} {
 		if !strings.Contains(string(b), w) {
 			t.Errorf("plist lacks %q:\n%s", w, b)
 		}
