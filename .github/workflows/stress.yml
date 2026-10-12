@@ -7,6 +7,10 @@ on:
         type: choice
         options: ['40', '1000']
         default: '40'
+      mw_ref:
+        description: "miniwaves git ref to build mw from (default: v<MinMW>)"
+        type: string
+        default: ''
 jobs:
   stress:
     strategy:
@@ -24,12 +28,15 @@ jobs:
           go-version: '1.23.x'
       - name: Pinned mw version (MinMW)
         id: pin
-        run: echo "mw=$(sed -n 's/.*MinMW *= *"\([0-9.]*\)".*/\1/p' mw.go)" >> "$GITHUB_OUTPUT"
-      - name: Check out miniwaves at v${{ steps.pin.outputs.mw }}
+        run: |
+          ref="${{ inputs.mw_ref }}"
+          [ -n "$ref" ] || ref="v$(sed -n 's/.*MinMW *= *"\([0-9.]*\)".*/\1/p' mw.go)"
+          echo "mw=$ref" >> "$GITHUB_OUTPUT"
+      - name: Check out miniwaves at ${{ steps.pin.outputs.mw }}
         uses: actions/checkout@v6
         with:
           repository: stormovermars/miniwaves
-          ref: v${{ steps.pin.outputs.mw }}
+          ref: ${{ steps.pin.outputs.mw }}
           path: miniwaves-src
       - name: Build mw from source and put it on PATH
         run: |
