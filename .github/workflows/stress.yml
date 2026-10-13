@@ -8,7 +8,7 @@ on:
         options: ['40', '1000']
         default: '40'
       mw_ref:
-        description: "miniwaves git ref to build mw from (default: v<MinMW>)"
+        description: "miniwaves git ref to build mw from (default: latest mw release, else v<MinMW>)"
         type: string
         default: ''
 jobs:
@@ -28,8 +28,11 @@ jobs:
           go-version: '1.23.x'
       - name: Pinned mw version (MinMW)
         id: pin
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           ref="${{ inputs.mw_ref }}"
+          [ -n "$ref" ] || ref="$(gh release view --repo stormovermars/miniwaves --json tagName -q .tagName 2>/dev/null)"
           [ -n "$ref" ] || ref="v$(sed -n 's/.*MinMW *= *"\([0-9.]*\)".*/\1/p' mw.go)"
           echo "mw=$ref" >> "$GITHUB_OUTPUT"
       - name: Check out miniwaves at ${{ steps.pin.outputs.mw }}
