@@ -416,6 +416,7 @@ func (s *Server) tick() (stop bool, dispatched bool, err error) {
 	if err := d.recoverLost(); err != nil {
 		return false, false, err
 	}
+	d.reapTick()
 	seen := loadSeen(d.Home)
 	for _, t := range d.Cfg.tenantsInOrder() {
 		tc := d.Cfg.Tenants[t]

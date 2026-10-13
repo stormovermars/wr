@@ -76,6 +76,7 @@ type Config struct {
 	SelfDispatch bool                 `json:"self_dispatch"`
 	UI           UICfg                `json:"ui"`
 	Publish      PublishCfg           `json:"publish"`
+	Reap         *ReapCfg             `json:"reap,omitempty"`
 	Order        []string             `json:"-"` // tenant keys in file order
 }
 

@@ -378,15 +378,60 @@ func (m *MW) sessionItems(name string) ([]sessionItem, error) {
 // refused while another process reads the tenant file) is retried, so a settled run never
 // leaves its session idle. A refusal (still owns an item, unknown session) is not retried.
 func (m *MW) sessionStop(tenant, name string) error {
-	var err error
+	_, err := m.sessionStopRelease(tenant, name)
+	return err
+}
+
+// sessionStopRelease is sessionStop that, on mw >= 0.2.3, passes --release (items the
+// session still owns go back to ready instead of refusing the stop) and returns the
+// released item ids; older mw stops without it and returns none.
+func (m *MW) sessionStopRelease(tenant, name string) (released []string, err error) {
+	// -t keeps the command on one tenant file (no lock on every tenant)
+	args := []string{"session", "stop", name, "-t", tenant}
+	if m.hasReap() {
+		args = append(args, "--release")
+	}
 	for i := 0; ; i++ {
-		// -t keeps the command on one tenant file (no lock on every tenant)
-		_, err = retryLock(func() (string, error) { return m.must("session", "stop", name, "-t", tenant) })
-		if err == nil || i >= 2 || strings.Contains(err.Error(), "still owns") || strings.Contains(err.Error(), "not found") {
-			return err
+		var out string
+		out, err = retryLock(func() (string, error) { return m.must(args...) })
+		if err == nil {
+			for _, ln := range strings.Split(out, "\n") {
+				if f := strings.Fields(ln); len(f) == 2 && f[0] == "released" {
+					released = append(released, f[1])
+				}
+			}
+			return released, nil
+		}
+		if hasFlag(args, "--release") && strings.Contains(err.Error(), "unknown option") && strings.Contains(err.Error(), "--release") {
+			// mw was downgraded under the cached version: one plain stop, not counted as a failure
+			args = removeFlag(args, "--release")
+			i--
+			continue
+		}
+		if i >= 2 || strings.Contains(err.Error(), "still owns") || strings.Contains(err.Error(), "not found") {
+			return nil, err
 		}
 		time.Sleep(retryDelay)
 	}
+}
+
+func hasFlag(args []string, f string) bool {
+	for _, a := range args {
+		if a == f {
+			return true
+		}
+	}
+	return false
+}
+
+func removeFlag(args []string, f string) []string {
+	var out []string
+	for _, a := range args {
+		if a != f {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (m *MW) block(tenant, id, text, name string) error {

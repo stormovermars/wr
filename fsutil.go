@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -51,4 +52,12 @@ func envKeyIs(e, k string) bool {
 		return strings.EqualFold(e[:i], k)
 	}
 	return e[:i] == k
+}
+
+// writeFileAtomic writes data to path.tmp and renames it over path (renameRetry).
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if err := os.WriteFile(path+".tmp", data, perm); err != nil {
+		return err
+	}
+	return renameRetry(path+".tmp", path)
 }

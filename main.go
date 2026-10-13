@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const version = "0.2.2"
+const version = "0.2.3"
 
 var flagAliases = map[string]string{"t": "tenant", "n": "count", "j": "json", "b": "board"}
 var valueFlags = map[string]bool{"tenant": true, "count": true, "board": true, "show": true, "max-ticks": true, "last": true, "addr": true, "export": true, "tag": true}

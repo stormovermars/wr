@@ -64,7 +64,7 @@ takes it only to recover lost runs.
 
 ## serve (W2)
 
-`Server.tick` order: global STOP (exit) -> `recoverLost` -> usage snapshot
+`Server.tick` order: global STOP (exit) -> `recoverLost` -> `reapTick` (mw >= 0.2.3: `session reap -t SLUG --except LIVE -j` per enabled tenant and board, result in `~/.wr/reap.json`) -> usage snapshot
 (`Dispatcher.usage`: runs in the last 60 min, live groups, USD today per engine,
 statfs of `WR_HOME`) -> per enabled tenant in config-file order (`Config.Order`,
 read by scanning the `tenants` keys; tenants absent from it follow sorted):

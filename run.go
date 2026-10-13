@@ -292,6 +292,8 @@ type Dispatcher struct {
 	pubPending bool       // a change waits for the interval to end
 	pubTimer   bool       // a delayed write is scheduled
 	pubWrites  int        // page writes so far (tests)
+
+	reapClampLogged bool // the older_than clamp was logged once
 }
 
 // afterFunc schedules the delayed publish (tests replace it).
@@ -790,8 +792,11 @@ func (d *Dispatcher) settleItems(m *MW, r *Run, why string, items []sessionItem,
 	if listErr != nil {
 		errs = append(errs, fmt.Errorf("session list failed: %w", listErr))
 	}
-	if err := m.sessionStop(r.Tenant, r.Name); err != nil {
+	released, err := m.sessionStopRelease(r.Tenant, r.Name)
+	if err != nil {
 		errs = append(errs, fmt.Errorf("session stop failed: %w", err))
+	} else if m.hasReap() && len(released) > 0 {
+		d.event("released", r.Tenant, fmt.Sprintf("%s: session stopped with --release, %d item(s) back to ready %s", r.Name, len(released), strings.Join(released, ",")), false)
 	}
 	return errors.Join(errs...)
 }

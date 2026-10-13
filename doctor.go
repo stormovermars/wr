@@ -139,6 +139,13 @@ func doctorCommand(out io.Writer, home string, o map[string]string) error {
 		add("disk", free >= float64(floor), fmt.Sprintf("%.1f GB free (floor %d)", free, floor))
 	}
 
+	if cfg != nil && cfg.reapEnabled() {
+		if _, clamped := cfg.reapOlderEff(); clamped {
+			add("reap", true, fmt.Sprintf("WARNING: older_than %s is below run_timeout_min + stale_minutes + 5m (%s); serve raises it to that", cfg.reapOlder(), cfg.reapFloor()))
+		} else {
+			add("reap", true, "older_than "+cfg.reapOlder())
+		}
+	}
 	if s := updateNotice(home); s != "" {
 		add("update", true, s)
 	}

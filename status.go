@@ -24,6 +24,7 @@ type statusDoc struct {
 	Cost     []costRow   `json:"cost"`
 	Stop     []string    `json:"stop_files"`
 	MW       mwInfo      `json:"mw"`
+	Reap     *reapState  `json:"reap,omitempty"` // last `mw session reap` of wr serve
 }
 
 type mwInfo struct {
@@ -196,6 +197,7 @@ func statusData(d *Dispatcher, o map[string]string) (statusDoc, error) {
 		}
 	}
 	doc.Paused = d.pausedNow(ts)
+	doc.Reap = readReapState(d.Home)
 	return doc, nil
 }
 
@@ -278,6 +280,18 @@ func statusCommand(d *Dispatcher, o map[string]string) error {
 	}
 	for _, f := range doc.Stop {
 		fmt.Fprintf(d.Out, "stop file: %s\n", f)
+	}
+	if r := doc.Reap; r != nil {
+		switch {
+		case r.Error != "":
+			fmt.Fprintf(d.Out, "reap: %s older-than %s error: %s\n", r.At, r.OlderThan, r.Error)
+		case len(r.Reaped) == 0:
+			fmt.Fprintf(d.Out, "reap: %s older-than %s nothing reaped\n", r.At, r.OlderThan)
+		default:
+			for _, x := range r.Reaped {
+				fmt.Fprintf(d.Out, "reap: %s older-than %s %s (%s) released %s\n", r.At, r.OlderThan, x.Session, x.Tenant, strings.Join(x.Items, ", "))
+			}
+		}
 	}
 	return failed()
 }

@@ -41,7 +41,7 @@ Also `--max-ticks N` (serve), `--last N` (status), `-f` (log).
 `~/.wr/config.json` (override the directory with `WR_HOME`). Written with the
 spec defaults on first run; edit it by hand. Keys: `tick_min`, `caps`
 (`per_hour parallel_global parallel_tenant usd_per_day run_timeout_min
-max_attempts disk_free_gb stale_minutes`), `pause`, `engines`, `tenants`, `self_dispatch`, `ui`, `publish`.
+max_attempts disk_free_gb stale_minutes`), `pause`, `engines`, `tenants`, `self_dispatch`, `ui`, `publish`, `reap`.
 `usd_per_day` also sets the per-run `--max-budget-usd` (a quarter of the day cap).
 
 Engine = argv array, never a shell string. Placeholders: `{uuid}` `{usd}`
@@ -52,7 +52,11 @@ Tenant: `engine`, `role`, `forbid` (strings added to the prompt), `dir` (null =
 the tenant path from `mw tenant list`), `enabled` (default false). The tenants
 `wr`, `miniwaves` and any `fleet*` are dispatched only with `self_dispatch: true`.
 
+Reap (on by default, enabled tenants only): `"reap": {"enabled": true, "older_than": "4h"}` (mw >= 0.2.3) makes `wr serve` call, once per tick and per wr-enabled tenant, `mw session reap -t SLUG --older-than 4h --except <wr's live run sessions> -j`: sessions with no activity for that long (killed controller, lost context) are stopped and the items they held go back to ready. Tenants wr does not dispatch are never reaped, and neither are wr's own running sessions. `older_than` takes `90m`, `4h`, `1d` (at most `365d`); it is raised at runtime to `run_timeout_min + stale_minutes + 5m` when lower (logged once as `reap-clamped`, and `wr doctor` warns). Each reaped session is an event in `events.log` (`reaped`), and `wr status` shows the last result (`~/.wr/reap.json`). `enabled: false` turns it off. With an older mw the call is skipped. Interactive sessions on enabled tenants should run `mw note ID "still on it" -s NAME` at least hourly during long silent work.
+
 Optional, off by default (errors are events in `events.log`, never fatal):
+
+
 `"publish": {"html": "PATH", "interval": 60}` writes the `wr ui` page with its data inlined (`wr ui --export PATH`, which always writes). After ticks and settles the page is rewritten only when its data changed (a hash is kept in `PATH.hash`) and at most every `interval` seconds (default 60, minimum 5; lower values clamp to 5, `wr doctor` says so). A change inside the interval is written at the interval's end, and a pending write is flushed when `once` or `serve` exits, so the page is never stale longer than the interval. Git is the coding agent's job: wr never runs git or a git sync command (the git sync command was removed in mw 0.2.1 and the old wr `sync` key is gone).
 The dirty-tree guard ignores `.miniwaves.json`, `.miniwaves.archive.json`, `.wr/` and the published page, so a board kept in the tenant repo does not block dispatch.
 
@@ -104,6 +108,13 @@ Read-only dashboard, no actions. Default is the terminal view: clears and redraw
 The web page is opt-in: `wr ui --web [--addr 127.0.0.1:5052] [--open]`, or config `"ui": {"web": true, "addr": "127.0.0.1:5052"}`. It serves one embedded page at `/` and JSON at `/api` (serve state, caps, cost, `runs`, `last`, `tenants`, `activity`), loopback only, polled every 3 s. Without the flag or key wr opens no socket. Tenants shown: enabled ones in config plus every tenant `mw tenant list` reports.
 
 ## Changelog
+
+### 0.2.3 (mw >= 0.2.1; session reap needs mw >= 0.2.3)
+
+- A run settled as lost, stuck or timed out stops its session with `mw session stop NAME -t T --release` (items wr could not block go back to ready instead of leaving the stop refused) and logs a `released` event. With mw < 0.2.3 (`mw version -j`) the plain stop is used as before. Items are still blocked first, so the `on_blocked` pause and the attempt counter work as before.
+- `wr serve` runs `mw session reap -t SLUG --older-than <reap.older_than, default 4h> --except <live run sessions> -j` once per tick for each wr-enabled tenant (never `-A`; config `reap: {enabled, older_than}`; skipped on mw < 0.2.3), logs `reaped` events and `wr status` shows the last result. A failed reap is a `reap-failed` event, never a tick error.
+- `older_than` below `run_timeout_min + stale_minutes + 5m` is raised to that floor (one `reap-clamped` event); `wr doctor` warns. Values over 365d, NaN or Inf are rejected (default 4h).
+- The `released` event is logged only when items went back to ready; a `--release` that mw rejects falls back to a plain stop; `reap.json` is replaced atomically.
 
 ### 0.2.2 (mw >= 0.2.1, board schema 8)
 
