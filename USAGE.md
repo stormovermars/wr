@@ -24,10 +24,10 @@ never be enabled for one tenant.
 | `wr stop [-t T]` | write `~/.wr/STOP` (serve exits) or `~/.wr/STOP.T` (that tenant is skipped, printed each tick). |
 | `wr start [-t T]` | remove the STOP file; with `-t` also clears a quality-guard pause for T. |
 | `wr service install\|remove` | write `~/Library/LaunchAgents/ro.nfnt.wr.plist` (macOS, loaded with launchctl) or `~/.config/systemd/user/wr.service` (linux, `systemctl --user enable --now`) running `wr serve`; logs `~/.wr/serve.out`, `serve.err`. Other OS: run `wr serve` by hand. |
-| `wr status [-j] [--last N]` | read-only (never recovers, settles or kills): per tenant enabled/last outcome/running/spend today/done of total/doing/blocked (one `mw list` per tenant, ready counts come from it; `wr next` names the item). Exit 1 when every enabled tenant errored; `live:` one row per running engine (tenant, item, age, transcript-mtime age, log path, `lost?` when its process is gone); `recent:` last N outcomes (default 5); `stuck:` items `doing` under a `wr-*` session with no live run; per-tenant skip/pause reason; mw schema; caps usage; `cost:` USD per engine per day; STOP files. `-j` prints `{tenants, live, recent, stuck, skips, caps, paused, cost, stop_files, mw}`. |
+| `wr status [-j] [--last N]` | read-only (never recovers, settles or kills): per tenant enabled/last outcome/running/spend today/done of total/doing/blocked, `gate LEVEL` (`gate proof (wants spec)` when it differs from the config; only tenants with a `gate_level`) on mw >= 0.2.5 (one `mw list` per tenant, ready counts come from it; `wr next` names the item). Exit 1 when every enabled tenant errored; `live:` one row per running engine (tenant, item, age, transcript-mtime age, log path, `lost?` when its process is gone); `recent:` last N outcomes (default 5); `stuck:` items `doing` under a `wr-*` session with no live run; per-tenant skip/pause reason; mw schema; caps usage; `cost:` USD per engine per day; STOP files. `-j` prints `{tenants (with `gate_level`, `gate_level_wanted`), live, recent, stuck, skips, caps, paused, cost, stop_files, mw}`. |
 | `wr ui [--once] [--web [--addr A] [--open]] [--export PATH]` | read-only dashboard, see [wr ui](#wr-ui). `--export PATH` writes the page with its data inlined and exits. |
 | `wr log [-f]` | tail `~/.wr/serve.out` (last 50 lines); `-f` follows. Without serve.out: the last runs and `events.log`. |
-| `wr doctor [-j]` | checks: mw on PATH, >= 0.2.1, schema 8; config; each enabled claude engine's flags against `claude --help` (absent ones listed, never edited; also warns on `--output-format json`); no enabled tenant is also owned by fleet-auto-dispatch; `~/.wr` writable; lock; disk floor. Exit 1 on any failure. A lock held by a running serve is reported as held. This replaces `wr engines`. |
+| `wr doctor [-j]` | checks: mw on PATH, >= 0.2.1, schema 8; config; each enabled claude engine's flags against `claude --help` (absent ones listed, never edited; also warns on `--output-format json`); no enabled tenant is also owned by fleet-auto-dispatch; `~/.wr` writable; lock; disk floor; `gate_level` values valid (FAIL), board level differs from config (WARN), mw too old for levels (INFO). Exit 1 on any failure. A lock held by a running serve is reported as held. This replaces `wr engines`. |
 | `wr version [-j]` | version. |
 
 The doctor update line asks GitHub at most once a day (failures count); `WR_NO_UPDATE_CHECK=1` turns it off.
@@ -51,6 +51,8 @@ Engine = argv array, never a shell string. Placeholders: `{uuid}` `{usd}`
 Tenant: `engine`, `role`, `forbid` (strings added to the prompt), `dir` (null =
 the tenant path from `mw tenant list`), `enabled` (default false). The tenants
 `wr`, `miniwaves` and any `fleet*` are dispatched only with `self_dispatch: true`.
+
+Gate level (optional, per tenant): `"gate_level": "proof"` (trust, proof, spec or judged; mw >= 0.2.5) makes `once` and `serve` set the tenant's mw gate level to it whenever the board differs (`mw gate level X -t SLUG --by wr`). With `gate_level` configured wr owns the tenant's level: it reverts a manual `mw gate level` (or a per-gate custom mix) within one tick; remove the key to hand control back. Values match case-insensitively; an unknown one is logged once and ignored. wr applies only to tenants it would run (not paused, STOPped, fleet-managed or self-dispatch off); a failed apply logs one `gate-level-failed` event. Absent: the board's level is left alone. There is no workspace-wide default (wr has no defaults block).
 
 Reap (on by default, enabled tenants only): `"reap": {"enabled": true, "older_than": "4h"}` (mw >= 0.2.3) makes `wr serve` call, once per tick and per wr-enabled tenant, `mw session reap -t SLUG --older-than 4h --except <wr's live run sessions> -j`: sessions with no activity for that long (killed controller, lost context) are stopped and the items they held go back to ready. Tenants wr does not dispatch are never reaped, and neither are wr's own running sessions. `older_than` takes `90m`, `4h`, `1d` (at most `365d`); it is raised at runtime to `run_timeout_min + stale_minutes + 5m` when lower (logged once as `reap-clamped`, and `wr doctor` warns). Each reaped session is an event in `events.log` (`reaped`), and `wr status` shows the last result (`~/.wr/reap.json`). `enabled: false` turns it off. With an older mw the call is skipped. Interactive sessions on enabled tenants should run `mw note ID "still on it" -s NAME` at least hourly during long silent work.
 
@@ -108,6 +110,11 @@ Read-only dashboard, no actions. Default is the terminal view: clears and redraw
 The web page is opt-in: `wr ui --web [--addr 127.0.0.1:5052] [--open]`, or config `"ui": {"web": true, "addr": "127.0.0.1:5052"}`. It serves one embedded page at `/` and JSON at `/api` (serve state, caps, cost, `runs`, `last`, `tenants`, `activity`), loopback only, polled every 3 s. Without the flag or key wr opens no socket. Tenants shown: enabled ones in config plus every tenant `mw tenant list` reports.
 
 ## Changelog
+
+### 0.2.4 (mw >= 0.2.1; gate levels need mw >= 0.2.5)
+
+- Tenant config `gate_level: trust|proof|spec|judged`: `wr once` and `wr serve` (every plan of an enabled tenant) run `mw gate level X -t SLUG --by wr` when the board's level (`mw gate -t SLUG -j`) differs, one log line and one `gate-level` event per change. No key = wr never touches the board's level. `wr next` and `wr status` never change it. Skipped on mw < 0.2.5.
+- `wr status` rows show `gate LEVEL`; `-j` rows carry `gate_level` (board) and `gate_level_wanted` (config). `wr doctor` fails on an unknown value, warns when the board differs from the config, and notes mw < 0.2.5.
 
 ### 0.2.3 (mw >= 0.2.1; session reap needs mw >= 0.2.3)
 

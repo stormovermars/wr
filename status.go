@@ -44,6 +44,9 @@ type statusRow struct {
 	Total   int      `json:"total"`
 	Doing   int      `json:"doing"`
 	Blocked int      `json:"blocked"`
+	// GateLevel is the board's level (mw >= 0.2.5), GateLevelWanted the configured one.
+	GateLevel       string `json:"gate_level,omitempty"`
+	GateLevelWanted string `json:"gate_level_wanted,omitempty"`
 }
 
 type pausedRow struct {
@@ -150,7 +153,7 @@ func statusData(d *Dispatcher, o map[string]string) (statusDoc, error) {
 	doc.Cost = costRows(all)
 	for _, t := range ts {
 		tc := d.Cfg.Tenants[t]
-		r := statusRow{Tenant: t, Tags: d.MW.meta(t).Tags, Enabled: tc.Enabled, Engine: tc.Engine, Last: lastOutcome(d.Home, t)}
+		r := statusRow{Tenant: t, Tags: d.MW.meta(t).Tags, Enabled: tc.Enabled, Engine: tc.Engine, Last: lastOutcome(d.Home, t), GateLevelWanted: normLevel(tc.GateLevel)}
 		for _, x := range all {
 			if x.Tenant != t {
 				continue
@@ -165,6 +168,9 @@ func statusData(d *Dispatcher, o map[string]string) (statusDoc, error) {
 		if !tc.Enabled {
 			doc.Tenants = append(doc.Tenants, r)
 			continue
+		}
+		if validGateLevel(tc.GateLevel) { // no extra mw call for tenants without a gate_level
+			r.GateLevel = d.MW.gateLevelOf(t)
 		}
 		items, lerr := d.MW.listItems(t)
 		if lerr == nil {
@@ -236,7 +242,7 @@ func statusCommand(d *Dispatcher, o map[string]string) error {
 		return failed()
 	}
 	for _, r := range doc.Tenants {
-		fmt.Fprintf(d.Out, "%-14s enabled=%-5v engine=%-7s last=%-10s running=%d usd_today=%.4f done=%d/%d doing=%d blocked=%d%s\n", r.Tenant, r.Enabled, r.Engine, r.Last, r.Running, r.Today, r.Done, r.Total, r.Doing, r.Blocked, tagText(r.Tags))
+		fmt.Fprintf(d.Out, "%-14s enabled=%-5v engine=%-7s last=%-10s running=%d usd_today=%.4f done=%d/%d doing=%d blocked=%d%s%s\n", r.Tenant, r.Enabled, r.Engine, r.Last, r.Running, r.Today, r.Done, r.Total, r.Doing, r.Blocked, gateText(r.GateLevel, r.GateLevelWanted), tagText(r.Tags))
 	}
 	if s := archivedNote(doc.Archived); s != "" {
 		fmt.Fprintln(d.Out, s)
@@ -355,4 +361,15 @@ func logFallback(out io.Writer, home, p string) error {
 		fmt.Fprintln(out, strings.Join(lines, "\n"))
 	}
 	return nil
+}
+
+// gateText is the status column for the board's gate level ("" without mw support).
+func gateText(l, wanted string) string {
+	if l == "" {
+		return ""
+	}
+	if wanted != "" && wanted != l {
+		return " gate " + l + " (wants " + wanted + ")"
+	}
+	return " gate " + l
 }

@@ -413,6 +413,7 @@ func (s *Server) tick() (stop bool, dispatched bool, err error) {
 		return true, false, nil
 	}
 	d.MW.fresh()
+	d.resetLevelTries()
 	if err := d.recoverLost(); err != nil {
 		return false, false, err
 	}
@@ -431,6 +432,7 @@ func (s *Server) tick() (stop bool, dispatched bool, err error) {
 			delete(seen, t)
 			continue
 		}
+		d.applyLevel(t, tc) // before the quality guard reads the evidence state
 		items, lerr := d.MW.listItems(t)
 		if lerr != nil {
 			fmt.Fprintf(d.Out, "%s: error: %v\n", t, lerr)

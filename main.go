@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-const version = "0.2.3"
+const version = "0.2.4"
 
 var flagAliases = map[string]string{"t": "tenant", "n": "count", "j": "json", "b": "board"}
 var valueFlags = map[string]bool{"tenant": true, "count": true, "board": true, "show": true, "max-ticks": true, "last": true, "addr": true, "export": true, "tag": true}
@@ -227,6 +227,7 @@ func allErrored(d *Dispatcher, ts []string, errs int) error {
 }
 
 func nextCommand(d *Dispatcher, o map[string]string) error {
+	d.Dry = true
 	ts := tenantList(d.Cfg, o)
 	errs := 0
 	for _, t := range ts {

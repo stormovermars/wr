@@ -50,6 +50,9 @@ type TenantCfg struct {
 	Forbid  []string `json:"forbid"`
 	Dir     *string  `json:"dir"`
 	Enabled bool     `json:"enabled"`
+	// GateLevel: optional trust|proof|spec|judged; wr sets the tenant's mw gate level to it
+	// (mw >= 0.2.5). Absent: wr never touches the board's level. Doctor rejects unknown values.
+	GateLevel string `json:"gate_level,omitempty"`
 }
 
 // UICfg: `"ui": {"web": true, "addr": "127.0.0.1:5052"}` turns the web page on for `wr ui`.

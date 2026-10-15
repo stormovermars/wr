@@ -101,6 +101,9 @@ func newRig(t *testing.T) *rig {
 	sh(t, r.board, mwBin, "init", "b")
 	sh(t, r.board, mwBin, "tenant", "add", "t", "T", "-d", r.tdir)
 	sh(t, r.board, mwBin, "dirs", "set", "evidence", filepath.Join(r.board, "evidence")) // keep proof inside the temp board
+	// mw >= 0.2.5 defaults to level proof; the rig starts with the evidence gate off
+	// (the pre-0.2.5 default for non-product tenants) and tests call gateOn() to turn it on.
+	sh(t, r.board, mwBin, "gate", "evidence", "off", "--by", "wr-test", "-t", "t")
 	cfg, err := loadConfig(r.home)
 	if err != nil {
 		t.Fatal(err)

@@ -64,6 +64,8 @@ takes it only to recover lost runs.
 
 ## serve (W2)
 
+Gate level: `plan()` (not in peek or `wr next`/`Dry`) calls `applyLevel` for each enabled tenant after the self/fleet/engine/STOP/PAUSE checks (so only for tenants wr would run); `tick` also applies it before the quality guard reads the evidence state, once per tenant per tick (`once`: once per invocation): `MW.applyGateLevel` compares `tenant.gate_level` with the cached `mw gate -t T -j` (`{level, gates}` on mw >= 0.2.5, a bare array before) and runs `mw gate level X -t T --by wr` on a difference (`gate-level` event).
+
 `Server.tick` order: global STOP (exit) -> `recoverLost` -> `reapTick` (mw >= 0.2.3: `session reap -t SLUG --except LIVE -j` per enabled tenant and board, result in `~/.wr/reap.json`) -> usage snapshot
 (`Dispatcher.usage`: runs in the last 60 min, live groups, USD today per engine,
 statfs of `WR_HOME`) -> per enabled tenant in config-file order (`Config.Order`,

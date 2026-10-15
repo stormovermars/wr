@@ -439,31 +439,117 @@ func (m *MW) block(tenant, id, text, name string) error {
 	return err
 }
 
-// evidenceGate reports whether the evidence gate is effective for tenant t
-// (`mw gate -t T -j`, read-only, cached until fresh()). Any error returns true:
-// the strict check stays.
-func (m *MW) evidenceGate(t string) bool {
+// gateState is `mw gate -t T -j`: mw >= 0.2.5 answers {"level":..,"gates":[..]}, older mw a bare array.
+type gateState struct {
+	Level    string // "" from an mw without levels
+	Evidence bool   // evidence gate effective
+}
+
+func (m *MW) gateState(t string) (gateState, error) {
 	v, err := m.cached("gate/"+t, func() (any, error) {
 		out, err := m.must("gate", "-t", t, "-j")
 		if err != nil {
 			return nil, err
 		}
-		var gs []struct {
-			Name      string `json:"name"`
-			Effective bool   `json:"effective"`
-		}
-		if json.Unmarshal([]byte(out), &gs) != nil {
-			return nil, errors.New("bad gate json")
-		}
-		for _, g := range gs {
-			if g.Name == "evidence" {
-				return g.Effective, nil
-			}
-		}
-		return true, nil
+		return parseGate(out)
 	})
+	if err != nil {
+		return gateState{}, err
+	}
+	return v.(gateState), nil
+}
+
+func parseGate(out string) (gateState, error) {
+	type gate struct {
+		Name      string `json:"name"`
+		Effective bool   `json:"effective"`
+	}
+	var gs []gate
+	var gs0 gateState
+	if strings.HasPrefix(strings.TrimSpace(out), "{") {
+		var o struct {
+			Level string `json:"level"`
+			Gates []gate `json:"gates"`
+		}
+		if json.Unmarshal([]byte(out), &o) != nil {
+			return gs0, errors.New("bad gate json")
+		}
+		gs, gs0.Level = o.Gates, o.Level
+	} else if json.Unmarshal([]byte(out), &gs) != nil {
+		return gs0, errors.New("bad gate json")
+	}
+	gs0.Evidence = true
+	for _, g := range gs {
+		if g.Name == "evidence" {
+			gs0.Evidence = g.Effective
+		}
+	}
+	return gs0, nil
+}
+
+// evidenceGate reports whether the evidence gate is effective for tenant t
+// (`mw gate -t T -j`, read-only, cached until fresh()). Any error returns true:
+// the strict check stays.
+func (m *MW) evidenceGate(t string) bool {
+	g, err := m.gateState(t)
 	if err != nil {
 		return true
 	}
-	return v.(bool)
+	return g.Evidence
+}
+
+// LevelMW is the first mw with `mw gate level` and the "level" field of `mw gate -j`.
+const LevelMW = "0.2.5"
+
+// hasLevel reports whether the mw found by checkVersion supports gate levels.
+func (m *MW) hasLevel() bool { return m.Version != "" && !semverLess(m.Version, LevelMW) }
+
+var gateLevels = []string{"trust", "proof", "spec", "judged"}
+
+// normLevel lower-cases a configured level (mw matches case-insensitively).
+func normLevel(l string) string { return strings.ToLower(strings.TrimSpace(l)) }
+
+func validGateLevel(l string) bool {
+	l = normLevel(l)
+	for _, x := range gateLevels {
+		if x == l {
+			return true
+		}
+	}
+	return false
+}
+
+// gateLevelOf is the board's level for tenant t ("" when unknown or mw has no levels).
+func (m *MW) gateLevelOf(t string) string {
+	if !m.hasLevel() {
+		return ""
+	}
+	g, err := m.gateState(t)
+	if err != nil {
+		return ""
+	}
+	return g.Level
+}
+
+// applyGateLevel makes the board's gate level for t match the configured one (wanted ""
+// = none configured: never touches the board). It reports whether it changed it.
+func (m *MW) applyGateLevel(t, wanted string) (changed bool, from string, err error) {
+	wanted = normLevel(wanted)
+	if wanted == "" || !validGateLevel(wanted) || !m.hasLevel() {
+		return false, "", nil
+	}
+	g, err := m.gateState(t)
+	if err != nil {
+		return false, "", err
+	}
+	if g.Level == wanted {
+		return false, g.Level, nil
+	}
+	if _, err := m.must("gate", "level", wanted, "-t", t, "--by", "wr"); err != nil {
+		return false, g.Level, err
+	}
+	m.mu.Lock()
+	delete(m.memo, "gate/"+t)
+	m.mu.Unlock()
+	return true, g.Level, nil
 }

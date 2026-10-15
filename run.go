@@ -287,11 +287,16 @@ type Dispatcher struct {
 
 	Ctx  context.Context // serve cancels it on SIGTERM/SIGINT; nil = never
 	Tags string          // --tag filter for status and ui (comma-joined, AND)
+	Dry  bool            // `wr next`: plan only, never change the board (no gate-level apply)
 
 	hookMu     sync.Mutex // serializes the published page
 	pubPending bool       // a change waits for the interval to end
 	pubTimer   bool       // a delayed write is scheduled
 	pubWrites  int        // page writes so far (tests)
+
+	lvlMu    sync.Mutex        // gate-level apply bookkeeping
+	lvlTried map[string]bool   // tenants already attempted since the last reset
+	lvlErr   map[string]string // last apply error per tenant (one event per distinct error)
 
 	reapClampLogged bool // the older_than clamp was logged once
 }
@@ -632,24 +637,11 @@ func (d *Dispatcher) planMode(slug string, peek bool) (*NextItem, string, error)
 	if mt.Archived {
 		return nil, "archived in mw (mw tenant restore " + slug + ")", nil
 	}
-	if isSelfTenant(slug) && !d.Cfg.SelfDispatch {
-		return nil, "self-dispatch off (self_dispatch: false)", nil
+	if why := d.blockReason(slug, tc); why != "" {
+		return nil, why, nil
 	}
-	if fleetManaged()[slug] {
-		return nil, "an external dispatcher has this tenant enabled (" + filepath.Join(fleetDir(), "state", "auto-dispatch.json") + "); wr refuses it", nil
-	}
-	eng, ok := d.Cfg.Engines[tc.Engine]
-	if !ok || !eng.Enabled || len(eng.Cmd) == 0 {
-		return nil, "engine " + tc.Engine + " not enabled or has no cmd", nil
-	}
-	if p := stopPath(d.Home, ""); fileExists(p) {
-		return nil, "STOP: " + p + " present (wr start)", nil
-	}
-	if p := stopPath(d.Home, slug); fileExists(p) {
-		return nil, "paused - STOP." + slug + " present (wr start -t " + slug + ")", nil
-	}
-	if p := pausePath(d.Home, slug); fileExists(p) {
-		return nil, "paused - " + readReason(p) + " (wr start -t " + slug + ")", nil
+	if !peek && !d.Dry {
+		d.applyLevel(slug, tc) // only for a tenant wr would run (a cap below is temporary)
 	}
 	u := d.usage()
 	if c := d.globalCap(u); c != "" {
@@ -706,6 +698,31 @@ func (d *Dispatcher) planMode(slug string, peek bool) (*NextItem, string, error)
 		return nil, fmt.Sprintf("retries: %s failed %d times (max %d)", n.ID, f, d.Cfg.maxAttempts()), nil
 	}
 	return n, "", nil
+}
+
+// blockReason is why wr refuses to run an enabled tenant (self-dispatch off, fleet-managed,
+// engine, STOP, STOP.<slug>, PAUSE), or "".
+func (d *Dispatcher) blockReason(slug string, tc TenantCfg) string {
+	if isSelfTenant(slug) && !d.Cfg.SelfDispatch {
+		return "self-dispatch off (self_dispatch: false)"
+	}
+	if fleetManaged()[slug] {
+		return "an external dispatcher has this tenant enabled (" + filepath.Join(fleetDir(), "state", "auto-dispatch.json") + "); wr refuses it"
+	}
+	eng, ok := d.Cfg.Engines[tc.Engine]
+	if !ok || !eng.Enabled || len(eng.Cmd) == 0 {
+		return "engine " + tc.Engine + " not enabled or has no cmd"
+	}
+	if p := stopPath(d.Home, ""); fileExists(p) {
+		return "STOP: " + p + " present (wr start)"
+	}
+	if p := stopPath(d.Home, slug); fileExists(p) {
+		return "paused - STOP." + slug + " present (wr start -t " + slug + ")"
+	}
+	if p := pausePath(d.Home, slug); fileExists(p) {
+		return "paused - " + readReason(p) + " (wr start -t " + slug + ")"
+	}
+	return ""
 }
 
 // planItems is the tenant's item list for planning: the full list when it is
@@ -1106,3 +1123,64 @@ func (d *Dispatcher) settleRec2(r *Run, why string, items []sessionItem, listErr
 		d.event("stop-failed", r.Tenant, r.Name+": "+err.Error(), true)
 	}
 }
+
+// applyLevel sets the board's gate level for a tenant wr would run to the configured one
+// (one log line per change; an mw error is logged and one gate-level-failed event is
+// written per distinct error, never fatal). At most one attempt per tenant until
+// resetLevelTries (serve: per tick; once: per invocation). An unknown value is
+// logged once per process and ignored; values match case-insensitively.
+func (d *Dispatcher) applyLevel(slug string, tc TenantCfg) {
+	if d.Dry || !tc.Enabled || tc.GateLevel == "" {
+		return
+	}
+	want := normLevel(tc.GateLevel)
+	if !validGateLevel(want) {
+		if _, dup := levelWarned.LoadOrStore(slug+"="+tc.GateLevel, true); !dup {
+			fmt.Fprintf(d.Out, "%s: gate_level %s unknown, ignored\n", slug, tc.GateLevel)
+		}
+		return
+	}
+	if d.blockReason(slug, tc) != "" {
+		return
+	}
+	d.lvlMu.Lock()
+	if d.lvlTried[slug] {
+		d.lvlMu.Unlock()
+		return
+	}
+	if d.lvlTried == nil {
+		d.lvlTried = map[string]bool{}
+	}
+	d.lvlTried[slug] = true
+	d.lvlMu.Unlock()
+	changed, from, err := d.MW.applyGateLevel(slug, want)
+	switch {
+	case err != nil:
+		fmt.Fprintf(d.Out, "%s: gate level %s not applied: %v\n", slug, want, err)
+		d.lvlMu.Lock()
+		if d.lvlErr == nil {
+			d.lvlErr = map[string]string{}
+		}
+		dup := d.lvlErr[slug] == err.Error()
+		d.lvlErr[slug] = err.Error()
+		d.lvlMu.Unlock()
+		if !dup {
+			d.event("gate-level-failed", slug, want+": "+err.Error(), false)
+		}
+	case changed:
+		d.lvlMu.Lock()
+		delete(d.lvlErr, slug)
+		d.lvlMu.Unlock()
+		fmt.Fprintf(d.Out, "%s: gate level %s -> %s\n", slug, from, want)
+		d.event("gate-level", slug, from+" -> "+want, false)
+	}
+}
+
+// resetLevelTries lets the next plan or tick try applying gate levels again.
+func (d *Dispatcher) resetLevelTries() {
+	d.lvlMu.Lock()
+	d.lvlTried = nil
+	d.lvlMu.Unlock()
+}
+
+var levelWarned sync.Map

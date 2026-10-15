@@ -89,6 +89,35 @@ func doctorCommand(out io.Writer, home string, o map[string]string) error {
 		}
 	}
 
+	if cfg != nil {
+		for _, t := range cfg.tenantsInOrder() {
+			if l := cfg.Tenants[t].GateLevel; l != "" && !validGateLevel(l) {
+				add("gate "+t, false, fmt.Sprintf("gate_level %q unknown (trust, proof, spec or judged)", l))
+			}
+		}
+		if m.Version != "" && !m.hasLevel() {
+			n := 0
+			for _, t := range cfg.tenantsInOrder() {
+				if cfg.Tenants[t].GateLevel != "" {
+					n++
+				}
+			}
+			if n > 0 {
+				add("gate-level", true, fmt.Sprintf("INFO: mw %s has no gate levels (needs >= %s); %d configured gate_level skipped", m.Version, LevelMW, n))
+			}
+		} else if m.hasLevel() && m.BoardFile != "" && m.requireSchema() == nil {
+			for _, t := range cfg.tenantsInOrder() {
+				tc := cfg.Tenants[t]
+				if !tc.Enabled || !validGateLevel(tc.GateLevel) {
+					continue
+				}
+				if cur := m.gateLevelOf(t); cur != "" && cur != normLevel(tc.GateLevel) {
+					add("gate "+t, true, fmt.Sprintf("WARN: board gate level %s, config wants %s (wr once/serve applies it)", cur, normLevel(tc.GateLevel)))
+				}
+			}
+		}
+	}
+
 	if cfg != nil && cfg.Publish.HTML != "" {
 		note := fmt.Sprintf("page %s rewritten when the data changed, at most every %s", cfg.Publish.HTML, cfg.Publish.interval())
 		if cfg.Publish.Interval != 0 && cfg.Publish.Interval < 5 {
