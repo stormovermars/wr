@@ -111,6 +111,14 @@ The web page is opt-in: `wr ui --web [--addr 127.0.0.1:5052] [--open]`, or confi
 
 ## Changelog
 
+### 0.2.5 (mw >= 0.2.1; board schema 8 or 9)
+
+- wr accepts schema 9 boards (mw 0.3.x). Schema 9 only added index keys wr never reads (wr talks to the board through the mw CLI), so 0.2.4's refusal ("wr needs schema 8: run `mw migrate`") was the only incompatibility. Schema 8 (mw 0.2.x) still works.
+- wr and mw install, update and uninstall together, each at its latest release: `install.sh`/`install.ps1` also install mw (and run `mw update --plugins` for mw's fanfare defaults and Claude Code plugins), `wr update` also installs or updates mw next to wr, and the uninstallers remove both. A failed mw download is one note line; wr's exit status is its own (2 only when both are current; `--check` exits 0 when either can be updated).
+- A too-old mw is reported with the fix: `mw X is too old; wr needs mw >= 0.2.1: run `mw update``.
+- `wr update` accepts GitHub's `release-assets.githubusercontent.com` download redirect.
+- CI tests against the latest mw release, plus one job at MinMW.
+
 ### 0.2.4 (mw >= 0.2.1; gate levels need mw >= 0.2.5)
 
 - Tenant config `gate_level: trust|proof|spec|judged`: `wr once` and `wr serve` (every plan of an enabled tenant) run `mw gate level X -t SLUG --by wr` when the board's level (`mw gate -t SLUG -j`) differs, one log line and one `gate-level` event per change. No key = wr never touches the board's level. `wr next` and `wr status` never change it. Skipped on mw < 0.2.5.

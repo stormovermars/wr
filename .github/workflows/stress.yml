@@ -33,7 +33,7 @@ jobs:
         run: |
           ref="${{ inputs.mw_ref }}"
           [ -n "$ref" ] || ref="$(gh release view --repo stormovermars/miniwaves --json tagName -q .tagName 2>/dev/null)"
-          [ -n "$ref" ] || ref="v$(sed -n 's/.*MinMW *= *"\([0-9.]*\)".*/\1/p' mw.go)"
+          [ -n "$ref" ] || ref="v$(sed -n 's/.*MinMW *= *"\([0-9.]*\)".*/\1/p' internal/wr/mw.go)"
           echo "mw=$ref" >> "$GITHUB_OUTPUT"
       - name: Check out miniwaves at ${{ steps.pin.outputs.mw }}
         uses: actions/checkout@v6
@@ -53,7 +53,7 @@ jobs:
         run: |
           if [ "${{ inputs.size }}" = 1000 ]; then run='TestThousandTenants'; to=40m; else run='TestFortyRunnersConcurrent'; to=20m; fi
           set -o pipefail
-          go test -run "$run" -count=1 -v -timeout "$to" . | tee stress.log
+          go test -run "$run" -count=1 -v -timeout "$to" ./internal/wr | tee stress.log
       - name: Summary
         if: always()
         run: |

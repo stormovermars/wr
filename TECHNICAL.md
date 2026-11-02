@@ -2,15 +2,18 @@
 
 ## Files
 
-- `main.go` flag parsing, commands (next, once, runs, version), the home lock, the home lock.
-- `serve.go` serve loop (`Server.tick`, goroutine dispatch, wake channel), caps usage, pause rules, quality guard, STOP/PAUSE files, stop/start, service files.
-- `status.go` `status` (read-only) and `log`. `fleet.go` the optional `WR_FLEET_DIR` overlap check, `events.log`, notifications.
-- `config.go` config structs, default literal (verbatim from the spec), load/save, `WR_HOME`.
-- `mw.go` the only mw surface: exec `mw` with cwd = board dir, JSON decode. Never reads `.miniwaves.json` (the board file path and schema come from `mw version -j`).
-- `run.go` records, naming, planning guards, dispatch sequence, outcome, lost recovery, log cap, usage parse.
-- `proc_unix.go` / `proc_windows.go` setpgid + group kill, pid probe, flock. Windows is stubbed; W3 list: Windows lock (LockFileEx), a job object for group kill, and `diskFreeGB`.
-- `serve_test.go` caps, pauses, STOP, cooldown, service files, 
-- `testdata/fakeengine/main.go` test engine, built by `TestMain` into a temp dir.
+Layout: `cmd/wr/main.go` is the entry point (calls `wr.Main`); the code is in `internal/wr` (one package: commands, dispatch, serve, ui, mw client, update) and `internal/osutil` (per-OS process and file primitives, no wr types). The root holds only docs, scripts, plugins and build/install scripts. Build with `go build ./cmd/wr` (or `./build.sh`).
+
+- `internal/wr/main.go` flag parsing, commands (next, once, runs, version), the home lock.
+- `internal/wr/serve.go` serve loop (`Server.tick`, goroutine dispatch, wake channel), caps usage, pause rules, quality guard, STOP/PAUSE files, stop/start, service files.
+- `internal/wr/status.go` `status` (read-only) and `log`. `fleet.go` the optional `WR_FLEET_DIR` overlap check, `events.log`, notifications.
+- `internal/wr/config.go` config structs, default literal (verbatim from the spec), load/save, `WR_HOME`.
+- `internal/wr/mw.go` the only mw surface: exec `mw` with cwd = board dir, JSON decode. Never reads `.miniwaves.json` (the board file path and schema come from `mw version -j`).
+- `internal/wr/run.go` records, naming, planning guards, dispatch sequence, outcome, lost recovery, log cap, usage parse.
+- `internal/wr/ui.go` + `ui.html` (embedded) the dashboard; `update.go` `wr update`; `fsutil.go` atomic writes and the retried rename.
+- `internal/osutil/proc_unix.go` / `proc_windows.go` setpgid + group kill, pid probe, flock, disk free, process start time, VT mode; `replace_*.go` the replacing rename (POSIX rename on Windows).
+- `internal/wr/serve_test.go` caps, pauses, STOP, cooldown, service files; `plugin_test.go` checks the repo-root plugin and install files.
+- `internal/wr/testdata/fakeengine/main.go` test engine, built by `TestMain` into a temp dir.
 
 wr never writes into a repo or the board file; it changes the board only through mw.
 
@@ -81,7 +84,7 @@ item has that key) or empty `note`, trips the guard. The dispatch's own item is
 therefore judged on the next tick. A tenant's first tick seeds the baseline.
 
 `judged`/`evidence` are read as raw JSON (absent, null, "", false, [], {} = empty)
-(schema 8 only).
+(schema 8 and 9: same item and evidence fields).
 
 Known limit: with the evidence gate off for a tenant, mw never records evidence, so the quality guard would trip on its first done item; keep the gate on (`mw gate evidence on`) for dispatched tenants. Tests: `realmw_test.go` runs the loop against the binary in `MW` (skipped when unset); the fake engine writes proof into `<evidence>/<tenant>/<ID>/`, and `rig.gateOn()` turns the gate on.
 
@@ -90,7 +93,7 @@ Tests inject `Dispatcher.Now`/`Sleep`, call `Server.tick` directly, and point
 
 ## Windows
 
-`proc_windows.go` (stdlib `syscall` only):
+`internal/osutil/proc_windows.go` (stdlib `syscall` only):
 - Lock: `LockFileEx` on one byte at offset 1<<30, so the pid text stays readable; `writeLockPid` overwrites the pid in place (padded, no truncate) because the file is open and locked.
 - Engines: argv arrays, never a shell (no `sh -c` anywhere), so the same config works on Windows with `"cmd": ["claude.exe", ...]` or any `.exe`; a `.cmd`/`.bat` wrapper needs `["cmd", "/C", "x.cmd", ...]`.
 - Kill: no process groups; `killGroup` runs `taskkill /T /F /PID` (the engine's process tree), falling back to killing the engine alone. Caveat: a grandchild whose parent already exited is no longer reachable from the engine pid.
@@ -105,7 +108,9 @@ Tests inject `Dispatcher.Now`/`Sleep`, call `Server.tick` directly, and point
 `.github/workflows/stress.yml` (manual, `workflow_dispatch`, input `size` 40 or 1000) runs on ubuntu, macOS and Windows. Each job builds mw from `stormovermars/miniwaves` at `v<MinMW>` (no release asset needed), puts it on PATH and runs `WR_STRESS=1 go test -run TestFortyRunnersConcurrent` (size 40, 20 min) or `TestThousandTenants` (size 1000, 40 min). Every variant prints `STRESS <variant> done=<n>/<n> dup=<n> timeouts=<n> p50=<ms> p95=<ms> wall=<s>`; the job copies those lines to the step summary. Locally: `WR_STRESS=1 go test -run TestFortyRunnersConcurrent -v -count=1 . | grep ^STRESS`.
 
 
-- Schema comes from `mw version -j` (`{version, schema}`); mw < 0.2.1 or schema != 8 is refused (`checkVersion`/`requireSchema`), no fallback.
+- Schema comes from `mw version -j` (`{version, schema}`); mw < MinMW (0.2.1) or a board schema outside 8..9 is refused (`checkVersion`/`requireSchema`, with the fix `mw update` / `mw migrate`), no fallback. Schema 9 (mw 0.3.0) added only index keys (jobs, fanfare) that wr never reads.
+- Tandem install/update: `install.sh`/`install.ps1` fetch wr and then the latest mw through one `fetch` / `Fetch` function; `update.go` runs `updateSelf` then `updatePartner` (mw next to the wr binary, version from `mw version -j`, release API `partnerAPI`; tests point it at a closed port or a `fakePartner` httptest server). `fetchVerified(rel, repo, bin)` serves both binaries; `replaceExe` also creates a missing target. CI (`test.yml`) installs the latest mw release (`scripts/install-mw.sh`, `MW_VERSION` pins one) and a `min-mw` job runs the tests at MinMW.
+- Tests: `TestMain` sets `MW_USER_CONFIG` to a temp file and `MW_FANFARE_PLAYER`/`MW_FANFARE_BEEP` (and `MW_FANFARE_NOTIFY` for mw <= 0.3.18) to a no-op unless set, so the real mw the tests run never plays a sound or reads the developer's config.
 - `serve` runs under `signal.NotifyContext(SIGTERM, SIGINT)`: a cancel kills the engine's process group, blocks the item and marks the run `incomplete`, then serve exits; the inter-tick sleep wakes on cancel.
 - The quality-guard baseline (`state.json`) is not advanced when the PAUSE file cannot be written, so the trip is re-found next tick; disabled tenants are dropped from `state.json`.
 - `disk_free_gb` fails closed: if free space cannot be read, dispatch is skipped with the reason printed. Service files carry `PATH` (install-time plus the dirs of `mw` and the engines) and launchd `KeepAlive` restarts only on non-zero exit.
