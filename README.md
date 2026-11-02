@@ -15,7 +15,7 @@ Or the CLI alone (needs mw >= 0.2.1):
 ```sh
 curl -fsSL https://raw.githubusercontent.com/stormovermars/wr/main/install.sh | sh   # macOS, Linux
 irm https://raw.githubusercontent.com/stormovermars/wr/main/install.ps1 | iex        # Windows
-go install github.com/stormovermars/wr@latest
+go install github.com/stormovermars/wr/cmd/wr@latest
 ```
 
 Update: `wr update` (`--check` only reports; it also says when mw needs `mw update`), or re-run the plugin/install one-liner.

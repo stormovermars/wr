@@ -2,15 +2,18 @@
 
 ## Files
 
-- `main.go` flag parsing, commands (next, once, runs, version), the home lock, the home lock.
-- `serve.go` serve loop (`Server.tick`, goroutine dispatch, wake channel), caps usage, pause rules, quality guard, STOP/PAUSE files, stop/start, service files.
-- `status.go` `status` (read-only) and `log`. `fleet.go` the optional `WR_FLEET_DIR` overlap check, `events.log`, notifications.
-- `config.go` config structs, default literal (verbatim from the spec), load/save, `WR_HOME`.
-- `mw.go` the only mw surface: exec `mw` with cwd = board dir, JSON decode. Never reads `.miniwaves.json` (the board file path and schema come from `mw version -j`).
-- `run.go` records, naming, planning guards, dispatch sequence, outcome, lost recovery, log cap, usage parse.
-- `proc_unix.go` / `proc_windows.go` setpgid + group kill, pid probe, flock. Windows is stubbed; W3 list: Windows lock (LockFileEx), a job object for group kill, and `diskFreeGB`.
-- `serve_test.go` caps, pauses, STOP, cooldown, service files, 
-- `testdata/fakeengine/main.go` test engine, built by `TestMain` into a temp dir.
+Layout: `cmd/wr/main.go` is the entry point (calls `wr.Main`); the code is in `internal/wr` (one package: commands, dispatch, serve, ui, mw client, update) and `internal/osutil` (per-OS process and file primitives, no wr types). The root holds only docs, scripts, plugins and build/install scripts. Build with `go build ./cmd/wr` (or `./build.sh`).
+
+- `internal/wr/main.go` flag parsing, commands (next, once, runs, version), the home lock.
+- `internal/wr/serve.go` serve loop (`Server.tick`, goroutine dispatch, wake channel), caps usage, pause rules, quality guard, STOP/PAUSE files, stop/start, service files.
+- `internal/wr/status.go` `status` (read-only) and `log`. `fleet.go` the optional `WR_FLEET_DIR` overlap check, `events.log`, notifications.
+- `internal/wr/config.go` config structs, default literal (verbatim from the spec), load/save, `WR_HOME`.
+- `internal/wr/mw.go` the only mw surface: exec `mw` with cwd = board dir, JSON decode. Never reads `.miniwaves.json` (the board file path and schema come from `mw version -j`).
+- `internal/wr/run.go` records, naming, planning guards, dispatch sequence, outcome, lost recovery, log cap, usage parse.
+- `internal/wr/ui.go` + `ui.html` (embedded) the dashboard; `update.go` `wr update`; `fsutil.go` atomic writes and the retried rename.
+- `internal/osutil/proc_unix.go` / `proc_windows.go` setpgid + group kill, pid probe, flock, disk free, process start time, VT mode; `replace_*.go` the replacing rename (POSIX rename on Windows).
+- `internal/wr/serve_test.go` caps, pauses, STOP, cooldown, service files; `plugin_test.go` checks the repo-root plugin and install files.
+- `internal/wr/testdata/fakeengine/main.go` test engine, built by `TestMain` into a temp dir.
 
 wr never writes into a repo or the board file; it changes the board only through mw.
 
@@ -90,7 +93,7 @@ Tests inject `Dispatcher.Now`/`Sleep`, call `Server.tick` directly, and point
 
 ## Windows
 
-`proc_windows.go` (stdlib `syscall` only):
+`internal/osutil/proc_windows.go` (stdlib `syscall` only):
 - Lock: `LockFileEx` on one byte at offset 1<<30, so the pid text stays readable; `writeLockPid` overwrites the pid in place (padded, no truncate) because the file is open and locked.
 - Engines: argv arrays, never a shell (no `sh -c` anywhere), so the same config works on Windows with `"cmd": ["claude.exe", ...]` or any `.exe`; a `.cmd`/`.bat` wrapper needs `["cmd", "/C", "x.cmd", ...]`.
 - Kill: no process groups; `killGroup` runs `taskkill /T /F /PID` (the engine's process tree), falling back to killing the engine alone. Caveat: a grandchild whose parent already exited is no longer reachable from the engine pid.
