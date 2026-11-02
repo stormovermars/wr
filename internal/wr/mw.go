@@ -167,10 +167,12 @@ func retryLock(call func() (string, error)) (string, error) {
 	return out, err
 }
 
-// wr needs mw >= MinMW and board schema 8 only (no compatibility with older mw).
+// wr needs mw >= MinMW and board schema 8 (mw 0.2.x) or 9 (mw 0.3.x): wr reads the board only
+// through the mw CLI, and 9 changed only index keys wr never touches (MIGRATION.md).
+// mw and wr install and update together, each at its latest release.
 const (
 	MinSchema = 8
-	MaxSchema = 8
+	MaxSchema = 9
 	MinMW     = "0.2.1"
 )
 
@@ -216,7 +218,7 @@ func (m *MW) checkVersion() error {
 		} `json:"tenants"`
 	}
 	if r.Code != 0 || json.Unmarshal([]byte(r.Out), &v) != nil || v.Schema == nil {
-		return fmt.Errorf("mw too old: `mw version -j` unavailable; wr needs mw >= %s (see MIGRATION.md)", MinMW)
+		return fmt.Errorf("mw too old: `mw version -j` unavailable; wr needs mw >= %s: run `mw update` (or `wr update`; see MIGRATION.md)", MinMW)
 	}
 	m.Version, m.Source, m.Schema, m.BoardFile = v.Version, "mw version -j", 0, ""
 	if v.BoardSchema != nil {
@@ -232,18 +234,18 @@ func (m *MW) checkVersion() error {
 	}
 	m.mu.Unlock()
 	if semverLess(v.Version, MinMW) {
-		return fmt.Errorf("mw %s is too old; wr needs mw >= %s (see MIGRATION.md)", v.Version, MinMW)
+		return fmt.Errorf("mw %s is too old; wr needs mw >= %s: run `mw update` (or `wr update`; see MIGRATION.md)", v.Version, MinMW)
 	}
 	return nil
 }
 
-// requireSchema refuses to run without a board, or on a schema other than 8.
+// requireSchema refuses to run without a board, or on a schema other than 8 or 9.
 func (m *MW) requireSchema() error {
 	if m.BoardFile == "" && m.Schema == 0 {
 		return fmt.Errorf("no mw board found from %s: run `mw init` there, or pass -b / set MW_BOARD", m.Board)
 	}
 	if !schemaOK(m.Schema) {
-		return fmt.Errorf("board schema %d (from %s), wr needs schema %d: run `mw migrate` (see MIGRATION.md)", m.Schema, m.Source, MinSchema)
+		return fmt.Errorf("board schema %d (from %s), wr needs schema %d-%d: run `mw update` and `wr update`, then `mw migrate` (see MIGRATION.md)", m.Schema, m.Source, MinSchema, MaxSchema)
 	}
 	return nil
 }

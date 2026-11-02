@@ -9,27 +9,44 @@ $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
     default { throw "Unsupported architecture: $env:PROCESSOR_ARCHITECTURE" }
 }
 $asset = "wr_Windows_$arch.zip"
-$base = if ($version -eq "latest") {
-    "https://github.com/$repo/releases/latest/download"
-} else {
-    "https://github.com/$repo/releases/download/$version"
-}
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("wr-" + [guid]::NewGuid())
 
-try {
-    New-Item -ItemType Directory -Force -Path $temp, $dest | Out-Null
-    $archive = Join-Path $temp $asset
-    $checksums = Join-Path $temp "checksums.txt"
+# Fetch REPO ASSET VERSION DIR: download a release asset, check it against the release's
+# checksums.txt and unpack it into DIR. Throws on any failure.
+function Fetch($repo, $asset, $version, $dir) {
+    $base = if ($version -eq "latest") {
+        "https://github.com/$repo/releases/latest/download"
+    } else {
+        "https://github.com/$repo/releases/download/$version"
+    }
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $archive = Join-Path $dir $asset
+    $checksums = Join-Path $dir "checksums.txt"
     Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile $archive
     Invoke-WebRequest -UseBasicParsing "$base/checksums.txt" -OutFile $checksums
     $line = Get-Content $checksums | Where-Object { $_ -match "^[0-9a-fA-F]{64}\s+\*?$([regex]::Escape($asset))$" } | Select-Object -First 1
-    if (-not $line) { throw "Release checksum not found" }
+    if (-not $line) { throw "Release checksum not found for $asset" }
     $expected = ($line -split "\s+")[0].ToLowerInvariant()
     $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) { throw "Release checksum mismatch" }
-    Expand-Archive -Force $archive $temp
+    if ($actual -ne $expected) { throw "Release checksum mismatch for $asset" }
+    Expand-Archive -Force $archive $dir
+}
+
+try {
+    New-Item -ItemType Directory -Force -Path $temp, $dest | Out-Null
+    Fetch $repo $asset $version $temp
     Copy-Item -Force (Join-Path $temp "wr.exe") (Join-Path $dest "wr.exe")
     Write-Output "installed wr to $(Join-Path $dest 'wr.exe')"
+    # mw installs with wr, always its latest release. Best effort: a failure is a note.
+    $partnerRepo = if ($env:MINIWAVES_REPO) { $env:MINIWAVES_REPO } else { "stormovermars/miniwaves" }
+    try {
+        Fetch $partnerRepo "miniwaves_Windows_$arch.zip" "latest" (Join-Path $temp "mw")
+        Copy-Item -Force (Join-Path $temp "mw\mw.exe") (Join-Path $dest "mw.exe")
+        Write-Output "installed mw to $(Join-Path $dest 'mw.exe')"
+        try { & (Join-Path $dest "mw.exe") update --plugins } catch { }
+    } catch {
+        Write-Output "mw: not installed (download failed); retry: wr update"
+    }
     # Put $dest on the user PATH (persisted for new shells, and for this one).
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $parts = @($userPath -split ";" | Where-Object { $_ })

@@ -27,6 +27,24 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	releaseAPI = "http://127.0.0.1:1/latest" // tests never reach GitHub (doctor's update check stays quiet)
+	partnerAPI = "http://127.0.0.1:1/latest" // nor for mw (fakePartner serves one)
+	// The real mw the tests run must never read the developer's per-user config or play a
+	// sound: mw children inherit this environment (exec.Command with no Env, or os.Environ()).
+	userDir, err := os.MkdirTemp("", "wr-mw-user")
+	if err != nil {
+		panic(err)
+	}
+	noop, _ := exec.LookPath("true")
+	if runtime.GOOS == "windows" {
+		noop = filepath.Join(userDir, "noop.bat")
+		os.WriteFile(noop, []byte("@exit /b 0\r\n"), 0o755)
+	}
+	for k, v := range map[string]string{"MW_USER_CONFIG": filepath.Join(userDir, "mw-user.json"),
+		"MW_FANFARE_PLAYER": noop, "MW_FANFARE_BEEP": noop, "MW_FANFARE_NOTIFY": noop} { // NOTIFY: mw <= 0.3.18
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
+		}
+	}
 	dir, err := os.MkdirTemp("", "wr-fake")
 	if err != nil {
 		panic(err)
@@ -61,6 +79,7 @@ func TestMain(m *testing.M) {
 	uiRefresh = 50 * time.Millisecond
 	engineWaitDelay = time.Second
 	code := m.Run()
+	os.RemoveAll(userDir)
 	os.RemoveAll(dir)
 	os.Exit(code)
 }

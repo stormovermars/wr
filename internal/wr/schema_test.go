@@ -30,11 +30,16 @@ func TestSchemaGuard(t *testing.T) {
 	}
 	// old mw: refused with the migration pointer (an old mw drops the sync/publish keys)
 	m = stubMW(t, `{"version":"0.1.0","schema":8,"board_schema":8,"board":"/b/x"}`)
-	if err := m.checkVersion(); err == nil || !strings.Contains(err.Error(), "0.2.1") || !strings.Contains(err.Error(), "MIGRATION.md") {
+	if err := m.checkVersion(); err == nil || !strings.Contains(err.Error(), "0.2.1") || !strings.Contains(err.Error(), "run `mw update`") || !strings.Contains(err.Error(), "MIGRATION.md") {
 		t.Fatalf("mw 0.1.0 must be refused: %v", err)
 	}
-	// old board schema (6) and newer (8): refused
-	for _, s := range []string{`{"version":"0.2.1","schema":8,"board_schema":7,"board":"/b/x"}`, `{"version":"0.9.0","schema":9,"board_schema":9,"board":"/b/x"}`} {
+	// schema 9 (mw 0.3.x): dispatches too
+	m = stubMW(t, `{"version":"0.3.18","schema":9,"board_schema":9,"board":"/b/.miniwaves.json"}`)
+	if err := m.checkVersion(); err != nil || m.Schema != 9 || m.requireSchema() != nil {
+		t.Fatalf("0.3.18/9 must dispatch: %v %+v", err, m)
+	}
+	// old board schema (7) and newer (10): refused
+	for _, s := range []string{`{"version":"0.2.1","schema":8,"board_schema":7,"board":"/b/x"}`, `{"version":"0.9.0","schema":10,"board_schema":10,"board":"/b/x"}`} {
 		m = stubMW(t, s)
 		if err := m.checkVersion(); err != nil {
 			t.Fatal(err)
@@ -59,16 +64,16 @@ func TestSchemaGuard(t *testing.T) {
 }
 
 func TestOnceRefusesWrongSchemaAndStatusSaysPath(t *testing.T) {
-	m := stubMW(t, `{"version":"0.2.1","schema":7,"board_schema":9,"board":"/b/x"}`)
+	m := stubMW(t, `{"version":"0.2.1","schema":7,"board_schema":10,"board":"/b/x"}`)
 	t.Setenv("WR_HOME", t.TempDir())
 	t.Setenv("MW", m.Bin)
 	t.Setenv("MW_BOARD", m.Board)
 	var out bytes.Buffer
-	if err := run([]string{"once"}, &out); err == nil || !strings.Contains(err.Error(), "schema 8") {
+	if err := run([]string{"once"}, &out); err == nil || !strings.Contains(err.Error(), "schema 8-9") {
 		t.Fatalf("once must refuse: %v", err)
 	}
 	out.Reset()
-	if err := run([]string{"status"}, &out); err != nil || !strings.Contains(out.String(), "schema 9 via mw version -j") || !strings.Contains(out.String(), "WILL NOT DISPATCH") {
+	if err := run([]string{"status"}, &out); err != nil || !strings.Contains(out.String(), "schema 10 via mw version -j") || !strings.Contains(out.String(), "WILL NOT DISPATCH") {
 		t.Fatalf("status: %v\n%s", err, out.String())
 	}
 }

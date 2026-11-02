@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -42,7 +43,7 @@ var (
 	}}
 	// assetURLCheck pins download URLs to GitHub (tests swap it for the httptest host).
 	assetURLCheck = func(u *url.URL) error {
-		if u.Scheme == "https" && (u.Host == "github.com" || u.Host == "objects.githubusercontent.com") {
+		if u.Scheme == "https" && (u.Host == "github.com" || u.Host == "objects.githubusercontent.com" || u.Host == "release-assets.githubusercontent.com") {
 			return nil
 		}
 		return fmt.Errorf("refusing download from %s", u.Redacted())
@@ -59,14 +60,16 @@ type ghRelease struct {
 	} `json:"assets"`
 }
 
-func latestRelease() (*ghRelease, error) {
-	b, err := fetchURL(releaseAPI)
+func latestRelease() (*ghRelease, error) { return releaseFrom(releaseAPI) }
+
+func releaseFrom(api string) (*ghRelease, error) {
+	b, err := fetchURL(api)
 	if err != nil {
 		return nil, err
 	}
 	var r ghRelease
 	if err := json.Unmarshal(b, &r); err != nil || r.Tag == "" {
-		return nil, fmt.Errorf("unexpected release data from %s", releaseAPI)
+		return nil, fmt.Errorf("unexpected release data from %s", api)
 	}
 	return &r, nil
 }
@@ -97,15 +100,18 @@ func getWith(c *http.Client, url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 200<<20))
 }
 
-// assetName is the release.yml name for this platform, e.g. miniwaves_Darwin_arm64.tar.gz.
-func assetName(goos, goarch string) string {
+// assetName is the release.yml name for this platform, e.g. wr_Darwin_arm64.tar.gz.
+func assetName(goos, goarch string) string { return assetFor(repoName, goos, goarch) }
+
+// assetFor is the release asset name of repo (wr or miniwaves) for a platform.
+func assetFor(repo, goos, goarch string) string {
 	osn := map[string]string{"darwin": "Darwin", "linux": "Linux", "windows": "Windows"}[goos]
 	arch := map[string]string{"amd64": "x86_64", "arm64": "arm64"}[goarch]
 	ext := ".tar.gz"
 	if goos == "windows" {
 		ext = ".zip"
 	}
-	return repoName + "_" + osn + "_" + arch + ext
+	return repo + "_" + osn + "_" + arch + ext
 }
 
 // newerVersion reports whether b is a newer x.y.z than a.
@@ -118,23 +124,6 @@ func updateCommand(out io.Writer, args []string) error {
 	if len(args) > 0 && !check {
 		return errors.New("usage: wr update [--check]")
 	}
-	rel, err := latestRelease()
-	if err != nil {
-		return fmt.Errorf("cannot read the latest release (%v); see %s", err, releasesURL)
-	}
-	latest := strings.TrimPrefix(rel.Tag, "v")
-	if !newerVersion(version, latest) {
-		mwHint(out, MinMW)
-		return &exitError{Code: 2, Msg: fmt.Sprintf("wr %s is current (latest release %s)", version, latest)}
-	}
-	if check {
-		fmt.Fprintf(out, "update available: %s → %s (wr update)\n", version, latest)
-		return nil
-	}
-	bin, err := fetchVerified(rel, assetName(runtime.GOOS, runtime.GOARCH))
-	if err != nil {
-		return err
-	}
 	exe, err := exePath()
 	if err != nil {
 		return err
@@ -142,18 +131,108 @@ func updateCommand(out io.Writer, args []string) error {
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
 	}
-	if err := replaceExe(exe, bin); err != nil {
-		return fmt.Errorf("cannot replace %s (%v); install the new version with:\n%s", exe, err, installHint)
+	changed, err := updateSelf(out, exe, check)
+	// mw is updated with wr (latest release of each); its failure is a note, never wr's exit status.
+	if updatePartner(out, exe, check) {
+		changed = true
 	}
-	fmt.Fprintf(out, "wr %s → %s (%s)\n", version, latest, exe)
-	// the new wr may need a newer mw: ask it for its min_mw
-	var nv struct {
-		MinMW string `json:"min_mw"`
+	if !check {
+		mwHint(out, MinMW) // still too old (or missing) after a failed mw download
 	}
-	if b, err := exec.Command(exe, "version", "-j").Output(); err == nil && json.Unmarshal(b, &nv) == nil && nv.MinMW != "" {
-		mwHint(out, nv.MinMW)
+	if err != nil {
+		return err
+	}
+	if !changed { // --check: 0 when something can be updated
+		return &exitError{Code: 2, Msg: fmt.Sprintf("wr %s and mw are current", version)}
 	}
 	return nil
+}
+
+// updateSelf replaces exe with the latest wr release and reports whether it did
+// (check: only says whether one exists).
+func updateSelf(out io.Writer, exe string, check bool) (bool, error) {
+	rel, err := latestRelease()
+	if err != nil {
+		return false, fmt.Errorf("cannot read the latest release (%v); see %s", err, releasesURL)
+	}
+	latest := strings.TrimPrefix(rel.Tag, "v")
+	if !newerVersion(version, latest) {
+		fmt.Fprintf(out, "wr %s is current (latest release %s)\n", version, latest)
+		return false, nil
+	}
+	if check {
+		fmt.Fprintf(out, "update available: %s → %s (wr update)\n", version, latest)
+		return true, nil
+	}
+	bin, err := fetchVerified(rel, repoName, binName)
+	if err != nil {
+		return false, err
+	}
+	if err := replaceExe(exe, bin); err != nil {
+		return false, fmt.Errorf("cannot replace %s (%v); install the new version with:\n%s", exe, err, installHint)
+	}
+	fmt.Fprintf(out, "wr %s → %s (%s)\n", version, latest, exe)
+	return true, nil
+}
+
+// The partner binary: wr and mw install and update together, each at its latest release.
+const partnerRepo, partnerBin = "miniwaves", "mw"
+
+var partnerAPI = "https://api.github.com/repos/stormovermars/" + partnerRepo + "/releases/latest"
+
+// updatePartner installs or updates mw next to exe, where the installers put it
+// (best effort: a failure is one note line).
+// It reports whether it changed mw (check: whether it would).
+func updatePartner(w io.Writer, exe string, check bool) bool {
+	p := filepath.Join(filepath.Dir(exe), partnerBin+filepath.Ext(exe))
+	have := binVersion(p) // "" when missing or not runnable
+	rel, err := releaseFrom(partnerAPI)
+	if err != nil {
+		fmt.Fprintf(w, "mw: not updated: cannot read the latest release (%v); retry: wr update\n", err)
+		return false
+	}
+	latest := strings.TrimPrefix(rel.Tag, "v")
+	switch {
+	case have != "" && !newerVersion(have, latest):
+		fmt.Fprintf(w, "mw %s is current (latest release %s)\n", have, latest)
+		return false
+	case check && have == "":
+		fmt.Fprintf(w, "mw %s available, not installed at %s (wr update installs it)\n", latest, p)
+		return true
+	case check:
+		fmt.Fprintf(w, "update available: mw %s → %s (wr update)\n", have, latest)
+		return true
+	}
+	bin, err := fetchVerified(rel, partnerRepo, partnerBin)
+	if err == nil {
+		err = replaceExe(p, bin)
+	}
+	if err != nil {
+		fmt.Fprintf(w, "mw: not updated: %s; retry: wr update\n", strings.ReplaceAll(err.Error(), "\n", " "))
+		return false
+	}
+	if have == "" {
+		have = "(new)"
+	}
+	fmt.Fprintf(w, "mw %s → %s (%s)\n", have, latest, p)
+	return true
+}
+
+// binVersion is the version a wr or mw binary reports in `version -j` ("" when it cannot say).
+func binVersion(p string) string {
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	b, err := exec.CommandContext(ctx, p, "version", "-j").Output()
+	var v struct {
+		Version string `json:"version"`
+	}
+	if err != nil || json.Unmarshal(b, &v) != nil {
+		return ""
+	}
+	return v.Version
 }
 
 // mwHint tells the user to update mw when the installed one is older than min.
@@ -193,14 +272,16 @@ func updateNotice(home string) string {
 	return ""
 }
 
-// fetchVerified downloads the asset and checksums.txt, checks the sha256 and returns the binary.
-func fetchVerified(rel *ghRelease, name string) ([]byte, error) {
+// fetchVerified downloads repo's asset for this platform and checksums.txt, checks the sha256
+// and returns the binary bin from the archive.
+func fetchVerified(rel *ghRelease, repo, bin string) ([]byte, error) {
+	name := assetFor(repo, runtime.GOOS, runtime.GOARCH)
 	urls := map[string]string{}
 	for _, a := range rel.Assets {
 		urls[a.Name] = a.URL
 	}
 	if urls[name] == "" || urls["checksums.txt"] == "" {
-		return nil, fmt.Errorf("release %s has no %s (or checksums.txt); see %s", rel.Tag, name, releasesURL)
+		return nil, fmt.Errorf("release %s has no %s (or checksums.txt); see https://github.com/stormovermars/%s/releases", rel.Tag, name, repo)
 	}
 	arc, err := getAsset(urls[name])
 	if err != nil {
@@ -220,10 +301,10 @@ func fetchVerified(rel *ghRelease, name string) ([]byte, error) {
 	if want == "" || want != hex.EncodeToString(got[:]) {
 		return nil, fmt.Errorf("checksum mismatch for %s: not installed", name)
 	}
-	return extractBinary(arc, strings.HasSuffix(name, ".zip"))
+	return extractBinary(arc, strings.HasSuffix(name, ".zip"), bin)
 }
 
-func extractBinary(arc []byte, isZip bool) ([]byte, error) {
+func extractBinary(arc []byte, isZip bool, binName string) ([]byte, error) {
 	if isZip {
 		zr, err := zip.NewReader(bytes.NewReader(arc), int64(len(arc)))
 		if err != nil {
@@ -276,7 +357,7 @@ func replaceExe(exe string, data []byte) error {
 		os.Remove(tmp)
 		return werr
 	}
-	if swapOld {
+	if _, err := os.Stat(exe); swapOld && err == nil {
 		_ = os.Remove(exe + ".old")
 		if err := renameRetry(exe, exe+".old"); err != nil {
 			os.Remove(tmp)

@@ -17,7 +17,7 @@ import (
 	"github.com/stormovermars/wr/internal/osutil"
 )
 
-const version = "0.2.4"
+const version = "0.2.5"
 
 var flagAliases = map[string]string{"t": "tenant", "n": "count", "j": "json", "b": "board"}
 var valueFlags = map[string]bool{"tenant": true, "count": true, "board": true, "show": true, "max-ticks": true, "last": true, "addr": true, "export": true, "tag": true}
@@ -76,9 +76,9 @@ func usage(out io.Writer, topic string) error {
 		"status":  "wr status [-j] [--last N] [--tag T]\n--tag T (repeatable, AND) keeps tenants with every tag; archived mw tenants are hidden (counted).\nRead-only: live runs (age, transcript age, log), last N outcomes (default 5), stuck items, per-tenant skip/pause reasons, caps, cost by day. Never recovers or kills; shows lost? for dead runs.",
 		"ui":      "wr ui [--once] [--tag T] [--export PATH] [--web [--addr 127.0.0.1:5052] [--open]]\n--export PATH writes the page with its data inlined and exits.\nRead-only dashboard: live runs, tenant columns (counts, doing/blocked/ready/inbox items, pause reason), activity feed. Default is the terminal view (redraws every 3 s, q or Ctrl-C quits); --once prints one frame. --web (or config \"ui\": {\"web\": true, \"addr\": \"...\"}) also serves a page on loopback; without it no socket is opened.",
 		"log":     "wr log [-f]\nTail ~/.wr/serve.out (last 50 lines); -f follows. Without serve.out: the last runs and events.log.",
-		"doctor":  "wr doctor [-j]\nChecks: mw >= 0.2.1, a board with schema 8 (from mw version -j), config, claude --help flags per engine, the optional WR_FLEET_DIR overlap check, no-git-repo notes, WR_HOME writable, lock, disk floor. Exit 1 on any failure.",
+		"doctor":  "wr doctor [-j]\nChecks: mw >= " + MinMW + " (fix: mw update), a board with schema 8 or 9 (from mw version -j), config, claude --help flags per engine, the optional WR_FLEET_DIR overlap check, no-git-repo notes, WR_HOME writable, lock, disk floor. Exit 1 on any failure.",
 		"version": "wr version [-j]\nPrints the version and the releases URL; -j gives {version, min_mw, repo, releases_url}.",
-		"update":  "wr update [--check]\nReplace this wr with the latest GitHub release for this OS/CPU (checksum verified; on Windows the old binary stays as wr.exe.old). --check only reports. Exit 2 when already current. Says when mw needs updating too.",
+		"update":  "wr update [--check]\nReplace this wr with the latest GitHub release for this OS/CPU (checksum verified; on Windows the old binary stays as wr.exe.old). --check only reports. Also installs or updates mw next to wr to its latest release (a failed mw download is a note; the exit status is wr's own). Exit 2 when both are already current.",
 		"serve":   "wr serve [--once] [--max-ticks N] [-b BOARD_DIR]\nEach tick starts dispatches in the background under the caps (parallel_global, parallel_tenant, per_hour...), then returns; an ok run triggers an immediate re-tick. Exits at the next tick when ~/.wr/STOP exists (running engines finish first). Holds ~/.wr/wr.lock.",
 		"stop":    "wr stop [-t TENANT]\nWrite ~/.wr/STOP (serve exits) or ~/.wr/STOP.<tenant> (that tenant skipped).",
 		"start":   "wr start [-t TENANT]\nRemove the STOP file; with -t also clear a quality-guard pause for that tenant.",
@@ -94,7 +94,7 @@ func usage(out io.Writer, topic string) error {
   wr serve | stop | start | service install|remove
   wr help [COMMAND]
 
-Needs mw >= 0.2.1 (schema 8). Config ~/.wr/config.json (WR_HOME overrides ~/.wr). Board dir: -b, MW_BOARD, or cwd.
+Needs mw >= `+MinMW+` (board schema 8 or 9); wr update keeps both current. Config ~/.wr/config.json (WR_HOME overrides ~/.wr). Board dir: -b, MW_BOARD, or cwd.
 STOP files: ~/.wr/STOP (global), ~/.wr/STOP.<tenant>.
 Releases: `+releasesURL+` · update: wr update`)
 	return nil

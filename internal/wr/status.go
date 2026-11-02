@@ -249,7 +249,7 @@ func statusCommand(d *Dispatcher, o map[string]string) error {
 	}
 	fmt.Fprintf(d.Out, "mw: schema %d via %s", doc.MW.Schema, doc.MW.Source)
 	if !schemaOK(d.MW.Schema) {
-		fmt.Fprintf(d.Out, " - WR WILL NOT DISPATCH (needs schema %d)", MinSchema)
+		fmt.Fprintf(d.Out, " - WR WILL NOT DISPATCH (needs schema %d-%d)", MinSchema, MaxSchema)
 	}
 	fmt.Fprintln(d.Out)
 	for _, l := range doc.Live {

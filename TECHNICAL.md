@@ -84,7 +84,7 @@ item has that key) or empty `note`, trips the guard. The dispatch's own item is
 therefore judged on the next tick. A tenant's first tick seeds the baseline.
 
 `judged`/`evidence` are read as raw JSON (absent, null, "", false, [], {} = empty)
-(schema 8 only).
+(schema 8 and 9: same item and evidence fields).
 
 Known limit: with the evidence gate off for a tenant, mw never records evidence, so the quality guard would trip on its first done item; keep the gate on (`mw gate evidence on`) for dispatched tenants. Tests: `realmw_test.go` runs the loop against the binary in `MW` (skipped when unset); the fake engine writes proof into `<evidence>/<tenant>/<ID>/`, and `rig.gateOn()` turns the gate on.
 
@@ -108,7 +108,9 @@ Tests inject `Dispatcher.Now`/`Sleep`, call `Server.tick` directly, and point
 `.github/workflows/stress.yml` (manual, `workflow_dispatch`, input `size` 40 or 1000) runs on ubuntu, macOS and Windows. Each job builds mw from `stormovermars/miniwaves` at `v<MinMW>` (no release asset needed), puts it on PATH and runs `WR_STRESS=1 go test -run TestFortyRunnersConcurrent` (size 40, 20 min) or `TestThousandTenants` (size 1000, 40 min). Every variant prints `STRESS <variant> done=<n>/<n> dup=<n> timeouts=<n> p50=<ms> p95=<ms> wall=<s>`; the job copies those lines to the step summary. Locally: `WR_STRESS=1 go test -run TestFortyRunnersConcurrent -v -count=1 . | grep ^STRESS`.
 
 
-- Schema comes from `mw version -j` (`{version, schema}`); mw < 0.2.1 or schema != 8 is refused (`checkVersion`/`requireSchema`), no fallback.
+- Schema comes from `mw version -j` (`{version, schema}`); mw < MinMW (0.2.1) or a board schema outside 8..9 is refused (`checkVersion`/`requireSchema`, with the fix `mw update` / `mw migrate`), no fallback. Schema 9 (mw 0.3.0) added only index keys (jobs, fanfare) that wr never reads.
+- Tandem install/update: `install.sh`/`install.ps1` fetch wr and then the latest mw through one `fetch` / `Fetch` function; `update.go` runs `updateSelf` then `updatePartner` (mw next to the wr binary, version from `mw version -j`, release API `partnerAPI`; tests point it at a closed port or a `fakePartner` httptest server). `fetchVerified(rel, repo, bin)` serves both binaries; `replaceExe` also creates a missing target. CI (`test.yml`) installs the latest mw release (`scripts/install-mw.sh`, `MW_VERSION` pins one) and a `min-mw` job runs the tests at MinMW.
+- Tests: `TestMain` sets `MW_USER_CONFIG` to a temp file and `MW_FANFARE_PLAYER`/`MW_FANFARE_BEEP` (and `MW_FANFARE_NOTIFY` for mw <= 0.3.18) to a no-op unless set, so the real mw the tests run never plays a sound or reads the developer's config.
 - `serve` runs under `signal.NotifyContext(SIGTERM, SIGINT)`: a cancel kills the engine's process group, blocks the item and marks the run `incomplete`, then serve exits; the inter-tick sleep wakes on cancel.
 - The quality-guard baseline (`state.json`) is not advanced when the PAUSE file cannot be written, so the trip is re-found next tick; disabled tenants are dropped from `state.json`.
 - `disk_free_gb` fails closed: if free space cannot be read, dispatch is skipped with the reason printed. Service files carry `PATH` (install-time plus the dirs of `mw` and the engines) and launchd `KeepAlive` restarts only on non-zero exit.

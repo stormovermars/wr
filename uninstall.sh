@@ -1,11 +1,13 @@
 #!/bin/sh
 set -eu
 
+# wr and mw install together, so they uninstall together.
 dest="${WR_INSTALL_DIR:-$HOME/.local/bin}"
-binary="$dest/wr"
-if [ -f "$binary" ]; then
-  rm -f "$binary"
-  echo "removed $binary"
-else
-  echo "wr is not installed at $binary"
-fi
+for b in wr mw; do
+  if [ -f "$dest/$b" ]; then
+    rm -f "$dest/$b"
+    echo "removed $dest/$b"
+  else
+    echo "$b is not installed at $dest/$b"
+  fi
+done
