@@ -3,7 +3,6 @@ package wr
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -274,9 +273,7 @@ func TestStatusIsReadOnlyAndShowsLiveStuckLost(t *testing.T) {
 	id := r.addReady("a")
 	sh(t, r.board, mwBin, "session", "start", "wr-t-a-1", "-t", "t")
 	sh(t, r.board, mwBin, "start", id, "-t", "t", "-s", "wr-t-a-1")
-	dead := exec.Command("true")
-	_ = dead.Run()
-	r.seedRun("wr-t-a-1", id, time.Now().UTC().Add(-time.Minute), dead.Process.Pid, nil, false)
+	r.seedRun("wr-t-a-1", id, time.Now().UTC().Add(-time.Minute), deadPID(t), nil, false)
 	var out bytes.Buffer
 	if err := run([]string{"status"}, &out); err != nil {
 		t.Fatal(err)

@@ -55,11 +55,19 @@ func main() {
 	case "crash":
 		os.Exit(3)
 	case "hang":
-		c := exec.Command("sleep", "60")
-		_ = c.Start()
+		// the child is this binary again (FAKE=sleep), not sleep(1): Windows has no sleep
+		self, _ := os.Executable()
+		c := exec.Command(self)
+		c.Env = append(os.Environ(), "FAKE=sleep")
+		if err := c.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, "fakeengine: child failed:", err)
+			os.Exit(9)
+		}
 		if p := os.Getenv("FAKE_PIDFILE"); p != "" {
 			_ = os.WriteFile(p, []byte(fmt.Sprintf("%d %d", os.Getpid(), c.Process.Pid)), 0o600)
 		}
+		time.Sleep(60 * time.Second)
+	case "sleep":
 		time.Sleep(60 * time.Second)
 	case "nodone":
 	}

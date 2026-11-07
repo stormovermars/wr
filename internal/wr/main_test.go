@@ -103,6 +103,17 @@ func sh(t *testing.T, dir string, name string, args ...string) string {
 	return string(out)
 }
 
+// deadPID returns the pid of a process that has already exited and been reaped.
+// It reruns the test binary with no tests, so it works where there is no `true` (Windows).
+func deadPID(t *testing.T) int {
+	t.Helper()
+	c := exec.Command(os.Args[0], "-test.run=^$")
+	if err := c.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return c.Process.Pid
+}
+
 // newRig builds a temp WR_HOME, an mw board with tenant "t", and a clean git tenant dir.
 func newRig(t *testing.T) *rig {
 	t.Helper()
@@ -322,9 +333,7 @@ func TestLostRecovery(t *testing.T) {
 	name := runName("t", 1, "aaaaaa")
 	sh(t, r.board, mwBin, "session", "start", name, "-t", "t", "-a", "builder")
 	sh(t, r.board, mwBin, "start", id, "-t", "t", "-s", name)
-	dead := exec.Command("true")
-	_ = dead.Run() // reaped: its pid is dead
-	rec := &Run{Name: name, Tenant: "t", Board: r.board, Item: id, Engine: "fake", PID: dead.Process.Pid, Start: time.Now().UTC()}
+	rec := &Run{Name: name, Tenant: "t", Board: r.board, Item: id, Engine: "fake", PID: deadPID(t), Start: time.Now().UTC()}
 	if err := writeRun(r.home, rec); err != nil {
 		t.Fatal(err)
 	}
